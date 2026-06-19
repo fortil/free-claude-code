@@ -113,37 +113,38 @@ def _append_input_item(
             tool_input = custom_tool_input_to_anthropic(item.get("input"))
         else:
             tool_input = parse_arguments(item.get("arguments"))
-        message = {
-            "role": "assistant",
-            "content": [
-                {
-                    "type": "tool_use",
-                    "id": call_id_from_item(item),
-                    "name": responses_tool_name_to_anthropic_name(
-                        name, namespace=namespace
-                    ),
-                    "input": tool_input,
-                }
-            ],
+        tool_use_block = {
+            "type": "tool_use",
+            "id": call_id_from_item(item),
+            "name": responses_tool_name_to_anthropic_name(name, namespace=namespace),
+            "input": tool_input,
         }
+        # Parallel tool calls arrive as separate Responses items but belong to a
+        # single assistant turn: coalesce them into one assistant message so the
+        # following tool results pair correctly (providers like Kimi reject an
+        # assistant tool call not immediately followed by its result).
+        if not pending_reasoning and _append_block_to_open_turn(
+            messages, "assistant", "tool_use", tool_use_block
+        ):
+            return None
+        message = {"role": "assistant", "content": [tool_use_block]}
         if pending_reasoning:
             message["reasoning_content"] = pending_reasoning
         messages.append(message)
         return None
     if item_type in {"function_call_output", "custom_tool_call_output"}:
         _append_pending_reasoning(messages, pending_reasoning)
-        messages.append(
-            {
-                "role": "user",
-                "content": [
-                    {
-                        "type": "tool_result",
-                        "tool_use_id": call_id_from_item(item),
-                        "content": item.get("output", ""),
-                    }
-                ],
-            }
-        )
+        tool_result_block = {
+            "type": "tool_result",
+            "tool_use_id": call_id_from_item(item),
+            "content": item.get("output", ""),
+        }
+        # Group the results of parallel calls into one user message, mirroring
+        # the coalesced assistant turn above.
+        if not _append_block_to_open_turn(
+            messages, "user", "tool_result", tool_result_block
+        ):
+            messages.append({"role": "user", "content": [tool_result_block]})
         return None
     if item_type == "reasoning":
         return combine_reasoning(pending_reasoning, reasoning_text_from_item(item))
@@ -180,6 +181,33 @@ def _append_message_item(
     if normalized_role == "assistant" and reasoning_content:
         message["reasoning_content"] = reasoning_content
     messages.append(message)
+
+
+def _append_block_to_open_turn(
+    messages: list[dict[str, Any]],
+    role: str,
+    block_type: str,
+    block: dict[str, Any],
+) -> bool:
+    """Append ``block`` to the trailing message when it is the same tool turn.
+
+    Returns ``True`` when the trailing message is a ``role`` message whose
+    content is a non-empty list made up solely of ``block_type`` blocks, so
+    consecutive parallel tool calls (or their results) collapse into one turn.
+    """
+    if not messages:
+        return False
+    last = messages[-1]
+    content = last.get("content")
+    if (
+        last.get("role") == role
+        and isinstance(content, list)
+        and content
+        and all(isinstance(b, dict) and b.get("type") == block_type for b in content)
+    ):
+        content.append(block)
+        return True
+    return False
 
 
 def _append_pending_reasoning(

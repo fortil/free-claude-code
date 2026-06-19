@@ -333,6 +333,92 @@ def test_responses_namespaced_prior_function_call_flattens_tool_use_name() -> No
     assert payload["messages"][0]["content"][0]["name"] == "mcp__node_repl__js"
 
 
+def test_responses_parallel_tool_calls_group_into_single_turns() -> None:
+    """Consecutive function calls/outputs collapse into one assistant + one user turn.
+
+    Regression for the Kimi/native HTTP 400 where each parallel call became its
+    own assistant message, breaking the tool_use -> tool_result pairing.
+    """
+    payload = _ADAPTER.to_anthropic_payload(
+        {
+            "model": "kimi/kimi-k2.7-code",
+            "input": [
+                {"type": "message", "role": "user", "content": "search github"},
+                {
+                    "type": "function_call",
+                    "call_id": "search:0",
+                    "name": "github_search",
+                    "arguments": "{}",
+                },
+                {
+                    "type": "function_call",
+                    "call_id": "commits:1",
+                    "name": "github_search_commits",
+                    "arguments": "{}",
+                },
+                {
+                    "type": "function_call",
+                    "call_id": "issues:2",
+                    "name": "github_search_issues",
+                    "arguments": "{}",
+                },
+                {"type": "function_call_output", "call_id": "search:0", "output": "a"},
+                {"type": "function_call_output", "call_id": "commits:1", "output": "b"},
+                {"type": "function_call_output", "call_id": "issues:2", "output": "c"},
+            ],
+        }
+    )
+
+    roles = [m["role"] for m in payload["messages"]]
+    assert roles == ["user", "assistant", "user"]
+
+    assistant_blocks = payload["messages"][1]["content"]
+    assert [b["type"] for b in assistant_blocks] == ["tool_use", "tool_use", "tool_use"]
+    assert [b["id"] for b in assistant_blocks] == ["search:0", "commits:1", "issues:2"]
+
+    result_blocks = payload["messages"][2]["content"]
+    assert [b["type"] for b in result_blocks] == [
+        "tool_result",
+        "tool_result",
+        "tool_result",
+    ]
+    assert [b["tool_use_id"] for b in result_blocks] == [
+        "search:0",
+        "commits:1",
+        "issues:2",
+    ]
+
+
+def test_responses_sequential_tool_calls_stay_separate() -> None:
+    """A call answered before the next is not merged into one turn."""
+    payload = _ADAPTER.to_anthropic_payload(
+        {
+            "model": "kimi/kimi-k2.7-code",
+            "input": [
+                {
+                    "type": "function_call",
+                    "call_id": "a",
+                    "name": "t",
+                    "arguments": "{}",
+                },
+                {"type": "function_call_output", "call_id": "a", "output": "1"},
+                {
+                    "type": "function_call",
+                    "call_id": "b",
+                    "name": "t",
+                    "arguments": "{}",
+                },
+                {"type": "function_call_output", "call_id": "b", "output": "2"},
+            ],
+        }
+    )
+
+    roles = [m["role"] for m in payload["messages"]]
+    assert roles == ["assistant", "user", "assistant", "user"]
+    for message in payload["messages"]:
+        assert len(message["content"]) == 1
+
+
 def test_responses_prior_custom_tool_call_flattens_tool_use_name() -> None:
     payload = _ADAPTER.to_anthropic_payload(
         {
