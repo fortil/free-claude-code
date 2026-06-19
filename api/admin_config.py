@@ -252,6 +252,18 @@ FIELDS: tuple[ConfigFieldSpec, ...] = (
         ),
     ),
     ConfigFieldSpec(
+        "OPENAI_API_KEY",
+        "OpenAI API Key",
+        "providers",
+        "secret",
+        settings_attr="openai_api_key",
+        secret=True,
+        description=(
+            "OpenAI API key (create in [API keys](https://platform.openai.com/api-keys)); "
+            "see [Chat Completions docs](https://platform.openai.com/docs/api-reference/chat)."
+        ),
+    ),
+    ConfigFieldSpec(
         "LM_STUDIO_BASE_URL",
         "LM Studio Base URL",
         "providers",
@@ -404,6 +416,15 @@ FIELDS: tuple[ConfigFieldSpec, ...] = (
         "providers",
         "secret",
         settings_attr="cerebras_proxy",
+        secret=True,
+        advanced=True,
+    ),
+    ConfigFieldSpec(
+        "OPENAI_PROXY",
+        "OpenAI Proxy",
+        "providers",
+        "secret",
+        settings_attr="openai_proxy",
         secret=True,
         advanced=True,
     ),
@@ -894,6 +915,12 @@ FIELDS: tuple[ConfigFieldSpec, ...] = (
     ConfigFieldSpec(
         "FCC_SMOKE_MODEL_CEREBRAS",
         "Smoke Cerebras Model",
+        "smoke",
+        advanced=True,
+    ),
+    ConfigFieldSpec(
+        "FCC_SMOKE_MODEL_OPENAI",
+        "Smoke OpenAI Model",
         "smoke",
         advanced=True,
     ),

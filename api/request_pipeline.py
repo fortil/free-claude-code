@@ -16,7 +16,12 @@ from config.settings import Settings
 from core.anthropic import get_token_count, get_user_facing_error_message
 from core.anthropic.sse import ANTHROPIC_SSE_RESPONSE_HEADERS
 from core.openai_responses import OpenAIResponsesAdapter
-from core.trace import api_messages_request_snapshot, trace_event, traced_async_stream
+from core.trace import (
+    api_messages_request_snapshot,
+    log_context_stream,
+    trace_event,
+    traced_async_stream,
+)
 from providers.base import BaseProvider
 from providers.exceptions import InvalidRequestError, ProviderError
 
@@ -351,6 +356,15 @@ class ApiRequestPipeline:
             route_trace["wire_api"] = "responses"
         trace_event(**route_trace)
 
+        # One concise, human-readable line per request, echoed to the terminal
+        # (console=True) so operators can see the active model live.
+        logger.bind(console=True, model=routed.resolved.provider_model).info(
+            "model: {} (provider={}, requested={})",
+            routed.resolved.provider_model,
+            routed.resolved.provider_id,
+            routed.resolved.original_model,
+        )
+
         request_id = f"req_{uuid.uuid4().hex[:12]}"
         trace_event(
             stage="ingress",
@@ -373,7 +387,7 @@ class ApiRequestPipeline:
             routed.request.system,
             routed.request.tools,
         )
-        return traced_async_stream(
+        traced = traced_async_stream(
             provider.stream_response(
                 routed.request,
                 input_tokens=input_tokens,
@@ -399,3 +413,6 @@ class ApiRequestPipeline:
                 "gateway_model": routed.request.model,
             },
         )
+        # Tag every log line emitted while the provider streams with the active
+        # downstream model, regardless of transport family (openai_chat / native).
+        return log_context_stream(traced, model=routed.resolved.provider_model)

@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 
 from core.openai_responses import OpenAIResponsesAdapter
+from core.openai_responses.reasoning import responses_reasoning_to_thinking
 
 _ADAPTER = OpenAIResponsesAdapter()
 _CONVERSION_ERROR = OpenAIResponsesAdapter.ConversionError
@@ -404,3 +405,34 @@ def test_responses_invalid_function_arguments_are_rejected() -> None:
                 ],
             }
         )
+
+
+def test_enabled_reasoning_maps_to_enabled_thinking() -> None:
+    # Conversion only signals thinking on; the budget invariant is enforced
+    # per-provider at build time, not here.
+    assert responses_reasoning_to_thinking({"effort": "low"}) == {
+        "type": "enabled",
+        "enabled": True,
+    }
+
+
+def test_disabled_and_absent_reasoning_map_correctly() -> None:
+    assert responses_reasoning_to_thinking({"effort": "none"}) == {
+        "type": "disabled",
+        "enabled": False,
+    }
+    assert responses_reasoning_to_thinking({"effort": None}) is None
+    assert responses_reasoning_to_thinking({}) is None
+    assert responses_reasoning_to_thinking(None) is None
+
+
+def test_enabled_reasoning_reaches_anthropic_payload_without_budget() -> None:
+    payload = _ADAPTER.to_anthropic_payload(
+        {
+            "model": "kimi/kimi-k2.7-code",
+            "input": "Hello",
+            "reasoning": {"effort": "low"},
+        }
+    )
+
+    assert payload["thinking"] == {"type": "enabled", "enabled": True}

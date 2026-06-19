@@ -9,6 +9,7 @@ from loguru import logger
 from config.constants import ANTHROPIC_DEFAULT_MAX_OUTPUT_TOKENS
 from core.anthropic.native_messages_request import (
     build_base_native_anthropic_request_body,
+    resolve_native_thinking_payload,
 )
 from providers.exceptions import InvalidRequestError
 
@@ -31,6 +32,19 @@ def build_request_body(request_data: Any, *, thinking_enabled: bool) -> dict:
         raise InvalidRequestError(
             "Kimi native Messages API does not support extra_body on requests."
         )
+
+    # Moonshot's kimi-k2.7-code Anthropic endpoint strictly enforces
+    # ``1024 <= thinking.budget_tokens < max_tokens``; normalize (or drop) the
+    # enabled thinking block so a budget-less or oversized budget never 400s.
+    if "thinking" in body:
+        thinking_payload = resolve_native_thinking_payload(
+            body["thinking"], max_tokens=body["max_tokens"]
+        )
+        if thinking_payload is None:
+            body.pop("thinking")
+        else:
+            body["thinking"] = thinking_payload
+
     body["stream"] = True
 
     logger.debug(

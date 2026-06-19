@@ -189,6 +189,22 @@ async def traced_async_stream(
         )
 
 
+async def log_context_stream(
+    agen: AsyncIterator[str], /, **context: Any
+) -> AsyncGenerator[str]:
+    """Yield from ``agen`` with every log line it emits tagged via loguru context.
+
+    Attaches request-scoped fields (e.g. ``model``) to all log lines produced
+    while the wrapped stream is consumed, regardless of which provider transport
+    generates them. The context stays active for the full lifetime of the
+    iteration and is cleared when the stream ends. Only keys listed in
+    ``config.logging_config._CONTEXT_KEYS`` are promoted to the JSON top level.
+    """
+    with logger.contextualize(**context):
+        async for chunk in agen:
+            yield chunk
+
+
 def provider_chat_body_snapshot(body: Mapping[str, Any]) -> dict[str, Any]:
     """Sanitized OpenAI-compat chat body subset for traces (conversation text verbatim)."""
     keys = ("model", "messages", "tools", "tool_choice", "temperature", "max_tokens")

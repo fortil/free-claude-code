@@ -57,7 +57,7 @@ Free Claude Code routes Anthropic Messages API traffic from Claude Code (CLI and
 - Drop-in proxy for Claude Code's Anthropic API calls (`/v1/messages`, `/v1/models`).
 - Drop-in proxy for Codex via the OpenAI Responses API (`/v1/responses`).
 - `fcc-claude` and `fcc-codex` launchers that read the current Admin UI port and auth token each time they start.
-- 17 provider backends: NVIDIA NIM, OpenRouter, Google AI Studio (Gemini), DeepSeek, Mistral La Plateforme, Mistral Codestral, OpenCode Zen, OpenCode Go, Wafer, Kimi, Cerebras Inference, Groq, Fireworks AI, Z.ai, LM Studio, llama.cpp, and Ollama.
+- 18 provider backends: NVIDIA NIM, OpenRouter, Google AI Studio (Gemini), DeepSeek, Mistral La Plateforme, Mistral Codestral, OpenCode Zen, OpenCode Go, Wafer, Kimi, Cerebras Inference, Groq, OpenAI, Fireworks AI, Z.ai, LM Studio, llama.cpp, and Ollama.
 - Per-model routing for Claude Code: send Opus, Sonnet, Haiku, and fallback traffic to different providers.
 - Native Claude Code `/model` picker support through the proxy's `/v1/models` endpoint (see [Model Picker](#model-picker)).
 - Native Codex `/model` picker support when launched through `fcc-codex`, using a generated local model catalog.
@@ -296,7 +296,17 @@ Reasoning-heavy models expose extra knobs documented under [Groq reasoning](http
 
 Browse models at [console.groq.com/docs/models](https://console.groq.com/docs/models).
 
-### 13. [Fireworks AI](https://fireworks.ai/)
+### 13. [OpenAI](https://platform.openai.com/)
+
+Get an API key at [platform.openai.com/api-keys](https://platform.openai.com/api-keys).
+
+In the Admin UI, paste it into `OPENAI_API_KEY`, then set `MODEL` to an OpenAI model slug such as `openai/gpt-4o`.
+
+OpenAI routes through `https://api.openai.com/v1` (native [OpenAI Chat Completions](https://platform.openai.com/docs/api-reference/chat)). Unlike the OpenAI-*compatible* providers above, this is the first-party endpoint, so fields such as `name`, `logprobs`, and `n` pass through unmodified; `max_tokens` is remapped to `max_completion_tokens`.
+
+Browse models at [platform.openai.com/docs/models](https://platform.openai.com/docs/models).
+
+### 14. [Fireworks AI](https://fireworks.ai/)
 
 Get an API key at [fireworks.ai/account/api-keys](https://fireworks.ai/account/api-keys).
 
@@ -306,7 +316,7 @@ Fireworks exposes an **Anthropic-compatible** Messages API at `https://api.firew
 
 Browse models at [fireworks.ai/models](https://fireworks.ai/models).
 
-### 14. [Z.ai](https://z.ai/)
+### 15. [Z.ai](https://z.ai/)
 
 Get an API key at [Z.ai/manage-apikey/apikey-list](https://z.ai/manage-apikey/apikey-list).
 
@@ -321,13 +331,13 @@ Popular examples:
 
 Browse models at [Z.ai](https://z.ai).
 
-### 15. [LM Studio](https://lmstudio.ai/)
+### 16. [LM Studio](https://lmstudio.ai/)
 
 Start LM Studio's local server and load a model. In the Admin UI, keep or update `LM_STUDIO_BASE_URL`, then set `MODEL` to the model identifier shown by LM Studio, prefixed with `lmstudio/`.
 
 Prefer models with tool-use support for Claude Code workflows.
 
-### 16. [llama.cpp](https://github.com/ggml-org/llama.cpp)
+### 17. [llama.cpp](https://github.com/ggml-org/llama.cpp)
 
 Start `llama-server` with an Anthropic-compatible `/v1/messages` endpoint and enough context for Claude Code requests.
 
@@ -335,7 +345,7 @@ In the Admin UI, keep or update `LLAMACPP_BASE_URL`, then set `MODEL` to the loc
 
 For local coding models, context size matters. If llama.cpp returns HTTP 400 for normal Claude Code requests, increase `--ctx-size` and verify the model/server build supports the requested features.
 
-### 17. [Ollama](https://ollama.com/)
+### 18. [Ollama](https://ollama.com/)
 
 Run Ollama and pull a model:
 
@@ -348,7 +358,7 @@ In the Admin UI, keep or update `OLLAMA_BASE_URL`, then set `MODEL` to the same 
 
 `OLLAMA_BASE_URL` is the Ollama server root; do not append `/v1`. Example model slugs include `ollama/llama3.1` and `ollama/llama3.1:8b`.
 
-### 18. Mix Providers By Model Tier
+### 19. Mix Providers By Model Tier
 
 Each model tier can use a different provider by setting `MODEL_OPUS`, `MODEL_SONNET`, and `MODEL_HAIKU` in the Admin UI. Leave a tier blank to inherit `MODEL`. These tier overrides apply to Claude model names that contain `opus`, `sonnet`, or `haiku`. Codex uses the Admin `MODEL` default through `fcc-codex` unless a session requests a provider-prefixed slug directly.
 

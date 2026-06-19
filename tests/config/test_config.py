@@ -272,6 +272,22 @@ class TestSettings:
         settings = Settings()
         assert settings.wafer_api_key == "wafer-key"
 
+    def test_openai_api_key_from_env(self, monkeypatch):
+        """OPENAI_API_KEY env var is loaded into settings."""
+        from config.settings import Settings
+
+        monkeypatch.setenv("OPENAI_API_KEY", "openai-key")
+        settings = Settings()
+        assert settings.openai_api_key == "openai-key"
+
+    def test_openai_proxy_from_env(self, monkeypatch):
+        """OPENAI_PROXY env var is loaded into settings."""
+        from config.settings import Settings
+
+        monkeypatch.setenv("OPENAI_PROXY", "http://openai-proxy:8080")
+        settings = Settings()
+        assert settings.openai_proxy == "http://openai-proxy:8080"
+
     def test_per_model_thinking_from_env(self, monkeypatch):
         """Per-model thinking env vars are loaded into settings."""
         from config.settings import Settings
@@ -638,6 +654,7 @@ class TestPerModelMapping:
             ({"MODEL": "lmstudio/qwen2.5-7b"}, "lmstudio/qwen2.5-7b", None),
             ({"MODEL": "llamacpp/local-model"}, "llamacpp/local-model", None),
             ({"MODEL": "ollama/llama3.1"}, "ollama/llama3.1", None),
+            ({"MODEL": "openai/gpt-4o"}, "openai/gpt-4o", None),
         ],
     )
     def test_settings_models_from_env(
@@ -789,6 +806,7 @@ class TestPerModelMapping:
         )
         assert Settings.parse_provider_type("groq/llama-3.3-70b-versatile") == "groq"
         assert Settings.parse_provider_type("cerebras/llama3.1-8b") == "cerebras"
+        assert Settings.parse_provider_type("openai/gpt-4o") == "openai"
 
     def test_parse_model_name(self):
         """parse_model_name extracts model name from model string."""
@@ -817,6 +835,7 @@ class TestPerModelMapping:
             == "llama-3.3-70b-versatile"
         )
         assert Settings.parse_model_name("cerebras/llama3.1-8b") == "llama3.1-8b"
+        assert Settings.parse_model_name("openai/gpt-4o") == "gpt-4o"
 
     def test_configured_chat_model_refs_collects_unique_models_with_sources(
         self, monkeypatch

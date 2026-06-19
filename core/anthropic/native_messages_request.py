@@ -10,6 +10,38 @@ from typing import Any
 
 from pydantic import BaseModel
 
+# Minimum Anthropic extended-thinking budget. The Messages API requires
+# ``1024 <= budget_tokens < max_tokens`` whenever ``thinking.type == "enabled"``;
+# strict upstreams (e.g. Moonshot ``kimi-k2.7-code``) reject the request otherwise.
+ANTHROPIC_MIN_THINKING_BUDGET_TOKENS = 1024
+
+
+def resolve_native_thinking_payload(
+    thinking_cfg: Any, *, max_tokens: int
+) -> dict[str, Any] | None:
+    """Return a wire-valid enabled thinking block, or ``None`` to drop thinking.
+
+    Enforces the Anthropic Messages contract ``1024 <= budget_tokens < max_tokens``
+    for strict upstreams: inject the minimum budget when the caller omitted one,
+    floor a sub-minimum budget, clamp a budget that would meet/exceed
+    ``max_tokens``, and drop thinking entirely when ``max_tokens`` cannot fit the
+    minimum budget (sending it anyway would be rejected). Not applied by the
+    shared builder below; provider builders opt in when their upstream is strict.
+    """
+    if not isinstance(thinking_cfg, dict):
+        return None
+    if max_tokens <= ANTHROPIC_MIN_THINKING_BUDGET_TOKENS:
+        return None
+    requested = thinking_cfg.get("budget_tokens")
+    budget = (
+        requested
+        if isinstance(requested, int)
+        else ANTHROPIC_MIN_THINKING_BUDGET_TOKENS
+    )
+    budget = min(max(budget, ANTHROPIC_MIN_THINKING_BUDGET_TOKENS), max_tokens - 1)
+    return {"type": "enabled", "budget_tokens": budget}
+
+
 _REQUEST_FIELDS = (
     "model",
     "messages",

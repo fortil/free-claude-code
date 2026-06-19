@@ -1,15 +1,19 @@
 from __future__ import annotations
 
+import json
 from collections.abc import AsyncIterator
+from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
 from fastapi.responses import StreamingResponse
+from loguru import logger
 
 from api.models.anthropic import Message, MessagesRequest
 from api.models.openai_responses import OpenAIResponsesRequest
 from api.request_pipeline import ApiRequestPipeline
+from config.logging_config import configure_logging
 from config.settings import Settings
 from providers.base import BaseProvider, ProviderConfig
 
@@ -98,6 +102,60 @@ def test_pipeline_message_optimization_intercepts_before_provider_execution():
         assert pipeline.create_message(request) is optimized
 
     provider_getter.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_pipeline_logs_active_model_and_tags_provider_stream(tmp_path):
+    """The active downstream model is logged once per request and tags stream logs.
+
+    Verifies the provider-agnostic chokepoint: a concise console line names the
+    model, and every log line the provider emits while streaming carries the
+    model field (works regardless of transport family).
+    """
+    log_file = tmp_path / "pipeline.log"
+    configure_logging(str(log_file), force=True)
+
+    class LoggingProvider(FakeProvider):
+        async def stream_response(
+            self,
+            request: Any,
+            input_tokens: int = 0,
+            *,
+            request_id: str | None = None,
+            thinking_enabled: bool | None = None,
+        ) -> AsyncIterator[str]:
+            logger.debug("provider streaming a chunk")
+            yield 'event: message_start\ndata: {"type":"message_start"}\n\n'
+            yield 'event: message_stop\ndata: {"type":"message_stop"}\n\n'
+
+    provider = LoggingProvider()
+    pipeline = ApiRequestPipeline(Settings(), provider_getter=lambda _: provider)
+    request = MessagesRequest(
+        model="nvidia_nim/test-model",
+        max_tokens=100,
+        messages=[Message(role="user", content="hi")],
+    )
+
+    response = pipeline.create_message(request)
+    assert isinstance(response, StreamingResponse)
+    await _streaming_body_text(response)
+    logger.complete()
+
+    rows = [
+        json.loads(line)
+        for line in Path(log_file).read_text(encoding="utf-8").strip().split("\n")
+        if line
+    ]
+    # Concise routing line names the active downstream model.
+    console_rows = [
+        r for r in rows if r.get("message", "").startswith("model: test-model")
+    ]
+    assert console_rows and console_rows[0]["model"] == "test-model"
+    # The provider's own mid-stream log line is tagged with the active model.
+    provider_rows = [
+        r for r in rows if r.get("message") == "provider streaming a chunk"
+    ]
+    assert provider_rows and provider_rows[0]["model"] == "test-model"
 
 
 @pytest.mark.asyncio

@@ -9,12 +9,23 @@ included at top level for easy grep/filter.
 import json
 import logging
 import re
+import sys
 import threading
 from pathlib import Path
 
 from loguru import logger
 
 _configured = False
+
+# Concise console sink format for the handful of lines explicitly marked for the
+# terminal (via ``logger.bind(console=True)``), e.g. the per-request active model.
+_CONSOLE_FORMAT = "<level>FCC</level> | {message}"
+
+
+def _console_filter(record) -> bool:
+    """Pass only records explicitly marked with ``logger.bind(console=True)``."""
+    return bool(record["extra"].get("console"))
+
 
 # Loguru ``logger.bind()`` key used by structured TRACE payloads; ``core/trace.py``
 # uses the identical string constant ``TRACE_PAYLOAD_BINDING``.
@@ -28,6 +39,7 @@ _CONTEXT_KEYS = (
     "claude_session_id",
     "http_method",
     "http_path",
+    "model",
 )
 
 _TELEGRAM_BOT_RE = re.compile(
@@ -137,6 +149,17 @@ def configure_logging(
         encoding="utf-8",
         mode="a",
         rotation="50 MB",
+        enqueue=True,
+    )
+
+    # Add console sink: only the few lines explicitly marked for the terminal
+    # (e.g. the active model per request). Keeps stdout readable next to uvicorn
+    # logs without echoing the full structured JSON stream.
+    logger.add(
+        sys.stderr,
+        level="INFO",
+        format=_CONSOLE_FORMAT,
+        filter=_console_filter,
         enqueue=True,
     )
 
