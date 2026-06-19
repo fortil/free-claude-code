@@ -18,6 +18,8 @@ from __future__ import annotations
 import re
 from collections.abc import Callable, Mapping
 
+from loguru import logger
+
 from config.model_store import load_aliases
 
 from .models.anthropic import ContentBlockText, Message, MessagesRequest
@@ -37,34 +39,32 @@ def apply_prompt_model_keyword(
     *,
     aliases_loader: Callable[[], Mapping[str, str]] | None = None,
 ) -> MessagesRequest:
-    """Return a request whose model is overridden by the most recent keyword.
+    """Return a request whose model is overridden by the latest prompt keyword.
 
-    The original request is returned unchanged when no user message leads with a
-    recognized keyword. Aliases are read only when a leading ``-<token>`` is
-    actually present, so the common path never touches disk.
+    The **most recent** keyword the user typed is authoritative: we never skip
+    past it to an older keyword. When the latest turn carries no keyword, the
+    last keyword-bearing message still applies (sticky); but typing a new
+    ``-keyword`` always wins, and an unrecognized one leaves the request on its
+    configured model rather than resurrecting an earlier selection. Aliases are
+    read only when a leading ``-<token>`` is present, so the common path never
+    touches disk.
     """
     candidates = _keyword_candidates(request.messages)
     if not candidates:
         return request
 
+    keyword = candidates[-1][1]
     aliases = (load_aliases if aliases_loader is None else aliases_loader)()
 
-    # The most recent recognized keyword decides the active model, so the choice
-    # sticks across turns until a different keyword appears later. A recognized
-    # keyword is either an alias or the reserved ``default`` sentinel (which
-    # reverts to the request's configured model). Unknown tokens are skipped so a
-    # later typo cannot clear an earlier selection.
-    matched = False
-    model_ref: str | None = None
-    for _index, keyword in reversed(candidates):
-        if keyword in _DEFAULT_KEYWORDS:
-            matched = True
-            break
-        if resolved := aliases.get(keyword):
-            matched = True
-            model_ref = resolved
-            break
-    if not matched:
+    is_default = keyword in _DEFAULT_KEYWORDS
+    model_ref = None if is_default else aliases.get(keyword)
+    if not is_default and model_ref is None:
+        # The latest keyword is not a known alias. Leave the request on its
+        # configured model instead of falling back to a stale earlier keyword.
+        logger.debug(
+            "prompt model keyword '-{}' is not a known alias; model unchanged",
+            keyword,
+        )
         return request
 
     updated = request.model_copy(deep=True)

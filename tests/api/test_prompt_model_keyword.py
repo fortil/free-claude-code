@@ -105,18 +105,22 @@ def test_newer_keyword_overrides_older() -> None:
     assert out.messages[-1].content == "switch to fast"
 
 
-def test_unknown_latest_keyword_falls_back_to_prior_recognized() -> None:
-    """An unrecognized newer token does not clear a recognized earlier choice."""
+def test_unknown_latest_keyword_does_not_resurrect_prior_model() -> None:
+    """A new but unrecognized keyword must not jump back to an earlier model.
+
+    Regression: the user typed a fresh -keyword to switch, but because it was not
+    a known alias the router used to fall back to a stale earlier keyword.
+    """
     history = [
-        Message(role="user", content="-kimi2.7 begin"),
+        Message(role="user", content="-fast did the plan"),
         Message(role="assistant", content="ok"),
     ]
-    request = _request("-notakeyword keep going", history=history)
+    request = _request("-kimi-k2.6-code now switch", history=history)
     out = apply_prompt_model_keyword(request, aliases_loader=_aliases)
-    assert out.model == "kimi/kimi-k2.7-code"
-    assert out.messages[0].content == "begin"
-    # The unrecognized token is left intact (it is real prompt text).
-    assert out.messages[-1].content == "-notakeyword keep going"
+    # The request is left on its configured model, NOT the earlier groq choice.
+    assert out is request
+    assert out.model == "nvidia_nim/test-model"
+    assert out.messages[-1].content == "-kimi-k2.6-code now switch"
 
 
 def test_keyword_resolved_against_last_user_after_assistant() -> None:
