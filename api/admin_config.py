@@ -458,6 +458,19 @@ FIELDS: tuple[ConfigFieldSpec, ...] = (
         description="Optional provider/model route for Haiku requests.",
     ),
     ConfigFieldSpec(
+        "UPDATE_MODELS_ON_REFRESH",
+        "Persist On Refresh",
+        "models",
+        "boolean",
+        settings_attr="update_models_on_refresh",
+        default="true",
+        description=(
+            "When on, Refresh models writes ~/.fcc/models.json and seeds "
+            "model-aliases.json / model-pricing.json. Turn off to keep those "
+            "files hand-curated."
+        ),
+    ),
+    ConfigFieldSpec(
         "ENABLE_MODEL_THINKING",
         "Enable Thinking",
         "thinking",

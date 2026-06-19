@@ -190,8 +190,9 @@ async def test_provider(provider_id: str, request: Request):
         }
     registry.cache_model_infos(provider_id, infos)
     model_ids = sorted(info.model_id for info in infos)
-    persist_refreshed_models({provider_id: model_ids})
-    seed_pricing_template({provider_id: model_ids})
+    if settings.update_models_on_refresh:
+        persist_refreshed_models({provider_id: model_ids})
+        seed_pricing_template({provider_id: model_ids})
     return {
         "provider_id": provider_id,
         "ok": True,
@@ -212,8 +213,9 @@ async def refresh_models(request: Request):
         provider_id: sorted(model_ids)
         for provider_id, model_ids in registry.cached_model_ids().items()
     }
-    persist_refreshed_models(cached)
-    seed_pricing_template(cached)
+    if settings.update_models_on_refresh:
+        persist_refreshed_models(cached)
+        seed_pricing_template(cached)
     return {"cached_models": cached}
 
 

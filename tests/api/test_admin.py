@@ -183,6 +183,38 @@ def test_provider_test_endpoint_persists_catalog_and_aliases(monkeypatch, tmp_pa
     assert (tmp_path / ".fcc" / "model-aliases.json").is_file()
 
 
+def test_refresh_skips_persistence_when_flag_off(monkeypatch, tmp_path):
+    _set_home(monkeypatch, tmp_path)
+    _clear_process_config(monkeypatch)
+    monkeypatch.setenv("UPDATE_MODELS_ON_REFRESH", "false")
+    from config.settings import get_settings
+
+    get_settings.cache_clear()
+    try:
+        app = create_app(lifespan_enabled=False)
+
+        from providers.model_listing import model_infos_from_ids
+        from providers.registry import ProviderRegistry
+
+        class _FakeProvider:
+            async def list_model_infos(self):
+                return model_infos_from_ids({"kimi-k2.7-code"})
+
+        monkeypatch.setattr(
+            ProviderRegistry, "get", lambda self, provider_id, settings: _FakeProvider()
+        )
+
+        response = _local_client(app).post("/admin/api/providers/kimi/test")
+        assert response.status_code == 200
+        assert response.json()["ok"] is True
+        # With the flag off, no on-disk files are written/seeded.
+        assert not (tmp_path / ".fcc" / "models.json").exists()
+        assert not (tmp_path / ".fcc" / "model-aliases.json").exists()
+        assert not (tmp_path / ".fcc" / "model-pricing.json").exists()
+    finally:
+        get_settings.cache_clear()
+
+
 def test_usage_endpoint_reports_tokens_and_cost(monkeypatch, tmp_path):
     _set_home(monkeypatch, tmp_path)
     _clear_process_config(monkeypatch)

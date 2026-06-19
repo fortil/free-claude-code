@@ -161,6 +161,13 @@ class Settings(BaseSettings):
     model_sonnet: str | None = Field(default=None, validation_alias="MODEL_SONNET")
     model_haiku: str | None = Field(default=None, validation_alias="MODEL_HAIKU")
 
+    # When true (default), refreshing models persists the discovered catalog and
+    # seeds alias/pricing files under ~/.fcc/. Turn off to keep those files
+    # curated by hand (a refresh then only updates the in-memory model cache).
+    update_models_on_refresh: bool = Field(
+        default=True, validation_alias="UPDATE_MODELS_ON_REFRESH"
+    )
+
     # ==================== Per-Provider Proxy ====================
     nvidia_nim_proxy: str = Field(default="", validation_alias="NVIDIA_NIM_PROXY")
     open_router_proxy: str = Field(default="", validation_alias="OPENROUTER_PROXY")
