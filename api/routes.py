@@ -31,6 +31,7 @@ def get_request_pipeline(
         ),
         token_counter=get_token_count,
         usage_recorder=_usage_recorder_for(request),
+        active_store=getattr(request.app.state, "active_model", None),
     )
 
 

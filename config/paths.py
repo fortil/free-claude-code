@@ -14,6 +14,7 @@ MODELS_CATALOG_FILENAME = "models.json"
 MODEL_ALIASES_FILENAME = "model-aliases.json"
 USAGE_STORE_FILENAME = "usage.json"
 MODEL_PRICING_FILENAME = "model-pricing.json"
+ACTIVE_MODEL_FILENAME = "active-model.json"
 
 
 def config_dir_path() -> Path:
@@ -78,3 +79,9 @@ def model_pricing_path() -> Path:
     """Return the path of the editable per-model price override file."""
 
     return config_dir_path() / MODEL_PRICING_FILENAME
+
+
+def active_model_path() -> Path:
+    """Return the path of the persisted active-model override set by a keyword."""
+
+    return config_dir_path() / ACTIVE_MODEL_FILENAME

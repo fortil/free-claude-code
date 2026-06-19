@@ -14,6 +14,7 @@ from loguru import logger
 
 from api.admin_urls import local_admin_url
 from api.usage_tracker import UsageTracker
+from config.active_model import ActiveModelStore
 from config.settings import Settings, get_settings
 from providers.exceptions import ServiceUnavailableError
 from providers.registry import ProviderRegistry
@@ -110,6 +111,7 @@ class AppRuntime:
         self.app.state.provider_registry = self._provider_registry
         self._usage_tracker = UsageTracker()
         self.app.state.usage_tracker = self._usage_tracker
+        self.app.state.active_model = ActiveModelStore()
         try:
             warn_if_process_auth_token(self.settings)
             await self._validate_configured_models_best_effort()

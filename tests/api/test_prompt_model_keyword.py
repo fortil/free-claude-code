@@ -12,6 +12,22 @@ def _aliases():
     return _ALIASES
 
 
+class FakeActiveStore:
+    """In-memory stand-in for config.active_model.ActiveModelStore."""
+
+    def __init__(self, model: str | None = None) -> None:
+        self.model = model
+
+    def load(self) -> str | None:
+        return self.model
+
+    def save(self, model_ref: str) -> None:
+        self.model = model_ref
+
+    def clear(self) -> None:
+        self.model = None
+
+
 def _request(content, *, model="nvidia_nim/test-model", history=None):
     messages = list(history or [])
     messages.append(Message(role="user", content=content))
@@ -165,3 +181,73 @@ def test_default_keyword_alone_strips_token_and_keeps_model() -> None:
     out = apply_prompt_model_keyword(request, aliases_loader=_aliases)
     assert out.model == "nvidia_nim/test-model"
     assert out.messages[-1].content == "just chatting"
+
+
+# --- Persistent active model (Option A) -------------------------------------
+
+
+def test_keyword_persists_to_active_store() -> None:
+    store = FakeActiveStore()
+    out = apply_prompt_model_keyword(
+        _request("-kimi2.7 do it"), aliases_loader=_aliases, active_store=store
+    )
+    assert out.model == "kimi/kimi-k2.7-code"
+    assert store.model == "kimi/kimi-k2.7-code"
+
+
+def test_persisted_active_model_applies_without_keyword() -> None:
+    """Survives compaction: a keyword-less prompt still routes to the active model."""
+    store = FakeActiveStore("kimi/kimi-k2.7-code")
+    out = apply_prompt_model_keyword(
+        _request("plain follow-up after compaction"),
+        aliases_loader=_aliases,
+        active_store=store,
+    )
+    assert out.model == "kimi/kimi-k2.7-code"
+    assert out.messages[-1].content == "plain follow-up after compaction"
+
+
+def test_unknown_keyword_keeps_persisted_active_model() -> None:
+    store = FakeActiveStore("kimi/kimi-k2.7-code")
+    out = apply_prompt_model_keyword(
+        _request("-typo keep going"), aliases_loader=_aliases, active_store=store
+    )
+    assert out.model == "kimi/kimi-k2.7-code"
+    assert store.model == "kimi/kimi-k2.7-code"
+
+
+def test_default_clears_active_store_and_reverts() -> None:
+    store = FakeActiveStore("kimi/kimi-k2.7-code")
+    out = apply_prompt_model_keyword(
+        _request("-default back to config"),
+        aliases_loader=_aliases,
+        active_store=store,
+    )
+    assert out.model == "nvidia_nim/test-model"
+    assert store.model is None
+    # After clearing, a later keyword-less prompt uses the configured model.
+    out2 = apply_prompt_model_keyword(
+        _request("anything"), aliases_loader=_aliases, active_store=store
+    )
+    assert out2.model == "nvidia_nim/test-model"
+
+
+def test_new_keyword_overwrites_active_store() -> None:
+    store = FakeActiveStore("kimi/kimi-k2.7-code")
+    out = apply_prompt_model_keyword(
+        _request("-fast switch"), aliases_loader=_aliases, active_store=store
+    )
+    assert out.model == "groq/llama-3.3-70b"
+    assert store.model == "groq/llama-3.3-70b"
+
+
+def test_active_model_store_round_trips_on_disk(tmp_path) -> None:
+    from config.active_model import ActiveModelStore
+
+    path = tmp_path / "active-model.json"
+    store = ActiveModelStore(path=path)
+    apply_prompt_model_keyword(
+        _request("-kimi2.7 do it"), aliases_loader=_aliases, active_store=store
+    )
+    # A fresh store loads the persisted selection (survives restart).
+    assert ActiveModelStore(path=path).load() == "kimi/kimi-k2.7-code"

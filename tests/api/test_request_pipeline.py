@@ -98,6 +98,54 @@ async def test_pipeline_prompt_keyword_overrides_routed_model(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_pipeline_active_model_persists_across_requests(monkeypatch, tmp_path):
+    """A keyword sets a persisted model that later keyword-less requests reuse."""
+    monkeypatch.setattr(
+        "api.prompt_model_keyword.load_aliases",
+        lambda: {"kimi2.7": "kimi/kimi-k2.7-code"},
+    )
+    from config.active_model import ActiveModelStore
+
+    store = ActiveModelStore(path=tmp_path / "active-model.json")
+    seen: list[str] = []
+    provider = FakeProvider()
+
+    def _getter(provider_id: str) -> FakeProvider:
+        seen.append(provider_id)
+        return provider
+
+    pipeline = ApiRequestPipeline(
+        Settings(), provider_getter=_getter, active_store=store
+    )
+
+    # Turn 1: keyword selects + persists kimi.
+    r1 = pipeline.create_message(
+        MessagesRequest(
+            model="nvidia_nim/test-model",
+            max_tokens=100,
+            messages=[Message(role="user", content="-kimi2.7 start")],
+        )
+    )
+    assert isinstance(r1, StreamingResponse)
+    await _streaming_body_text(r1)
+
+    # Turn 2: no keyword (e.g. after compaction) still routes to the persisted model.
+    r2 = pipeline.create_message(
+        MessagesRequest(
+            model="nvidia_nim/test-model",
+            max_tokens=100,
+            messages=[Message(role="user", content="plain follow up")],
+        )
+    )
+    assert isinstance(r2, StreamingResponse)
+    await _streaming_body_text(r2)
+
+    assert seen == ["kimi", "kimi"]
+    assert provider.requests[0].model == "kimi-k2.7-code"
+    assert provider.requests[1].model == "kimi-k2.7-code"
+
+
+@pytest.mark.asyncio
 async def test_pipeline_records_token_usage():
     """A completed request reports (provider_id, provider_model, in, out) tokens."""
     recorded: list[tuple] = []
