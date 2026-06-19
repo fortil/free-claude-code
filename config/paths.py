@@ -12,6 +12,8 @@ SERVER_LOG_FILENAME = "server.log"
 CODEX_MODEL_CATALOG_FILENAME = "codex-model-catalog.json"
 MODELS_CATALOG_FILENAME = "models.json"
 MODEL_ALIASES_FILENAME = "model-aliases.json"
+USAGE_STORE_FILENAME = "usage.json"
+MODEL_PRICING_FILENAME = "model-pricing.json"
 
 
 def config_dir_path() -> Path:
@@ -64,3 +66,15 @@ def model_aliases_path() -> Path:
     """Return the path of the editable keyword -> model alias map."""
 
     return config_dir_path() / MODEL_ALIASES_FILENAME
+
+
+def usage_store_path() -> Path:
+    """Return the path of the accumulated token-usage store."""
+
+    return config_dir_path() / USAGE_STORE_FILENAME
+
+
+def model_pricing_path() -> Path:
+    """Return the path of the editable per-model price override file."""
+
+    return config_dir_path() / MODEL_PRICING_FILENAME

@@ -8,10 +8,13 @@ sanitized credential keys (e.g. ``api_key``, ``authorization``).
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncGenerator, AsyncIterator, Mapping
+import json
+from collections.abc import AsyncGenerator, AsyncIterator, Callable, Mapping
 from typing import Any
 
 from loguru import logger
+
+UsageRecorder = Callable[[str, str, int, int], None]
 
 TRACE_PAYLOAD_BINDING = "trace_payload"
 
@@ -203,6 +206,71 @@ async def log_context_stream(
     with logger.contextualize(**context):
         async for chunk in agen:
             yield chunk
+
+
+async def record_usage_stream(
+    stream: AsyncIterator[str],
+    *,
+    on_usage: UsageRecorder,
+    provider_id: str,
+    model_id: str,
+) -> AsyncGenerator[str]:
+    """Yield from ``stream`` unchanged, recording token usage once it completes.
+
+    Reads the real usage carried by the final Anthropic SSE (``message_start`` ->
+    input tokens, ``message_delta`` -> output tokens), so capture is
+    provider-agnostic across every transport. Best-effort: it never interrupts
+    the stream.
+    """
+    buffer = ""
+    input_tokens: int | None = None
+    output_tokens: int | None = None
+    try:
+        async for chunk in stream:
+            yield chunk
+            buffer += chunk
+            while "\n\n" in buffer:
+                raw, buffer = buffer.split("\n\n", 1)
+                got_in, got_out = _usage_from_sse_event(raw)
+                if got_in is not None:
+                    input_tokens = got_in
+                if got_out is not None:
+                    output_tokens = got_out
+    finally:
+        if input_tokens is not None or output_tokens is not None:
+            try:
+                on_usage(provider_id, model_id, input_tokens or 0, output_tokens or 0)
+            except Exception:
+                logger.warning("usage recorder failed for provider={}", provider_id)
+
+
+def _usage_from_sse_event(raw: str) -> tuple[int | None, int | None]:
+    """Return (input_tokens, output_tokens) found in one Anthropic SSE event."""
+    event_type = ""
+    data_line = ""
+    for line in raw.splitlines():
+        stripped = line.rstrip("\r")
+        if stripped.startswith("event:"):
+            event_type = stripped.split(":", 1)[1].strip()
+        elif stripped.startswith("data:"):
+            data_line = stripped.split(":", 1)[1].strip()
+    if event_type not in ("message_start", "message_delta") or not data_line:
+        return None, None
+    try:
+        data = json.loads(data_line)
+    except json.JSONDecodeError:
+        return None, None
+    if not isinstance(data, dict):
+        return None, None
+    if event_type == "message_start":
+        usage = data.get("message", {}).get("usage", {})
+        return _usage_int(usage.get("input_tokens")), None
+    usage = data.get("usage", {})
+    return _usage_int(usage.get("input_tokens")), _usage_int(usage.get("output_tokens"))
+
+
+def _usage_int(value: Any) -> int | None:
+    return value if isinstance(value, int) else None
 
 
 def provider_chat_body_snapshot(body: Mapping[str, Any]) -> dict[str, Any]:

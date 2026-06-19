@@ -29,6 +29,13 @@ const VIEW_GROUPS = [
     sections: ["messaging", "voice"],
     containerId: "messagingSections",
   },
+  {
+    id: "usage",
+    label: "Usage",
+    title: "Token & Cost Usage",
+    sections: [],
+    containerId: "usageContent",
+  },
 ];
 
 const byId = (id) => document.getElementById(id);
@@ -157,6 +164,124 @@ function setActiveView(viewId, { scroll = false } = {}) {
   if (scroll) {
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
+
+  if (activeView.id === "usage") {
+    loadUsage();
+  }
+}
+
+function formatTokens(n) {
+  return Number(n || 0).toLocaleString();
+}
+
+function formatCost(cost) {
+  if (cost === null || cost === undefined) return "—";
+  return `$${Number(cost).toFixed(Number(cost) < 0.01 ? 6 : 4)}`;
+}
+
+async function loadUsage() {
+  const container = byId("usageContent");
+  container.textContent = "Loading usage…";
+  try {
+    const report = await api("/admin/api/usage");
+    renderUsage(report);
+  } catch (err) {
+    container.textContent = `Could not load usage: ${err.message}`;
+  }
+}
+
+function usageRow(cells, tag = "td") {
+  const tr = document.createElement("tr");
+  cells.forEach((value, index) => {
+    const cell = document.createElement(index === 0 ? tag : "td");
+    cell.textContent = value;
+    if (index > 0) cell.className = "num";
+    tr.appendChild(cell);
+  });
+  return tr;
+}
+
+function renderUsage(report) {
+  const container = byId("usageContent");
+  container.innerHTML = "";
+
+  const bar = document.createElement("div");
+  bar.className = "usage-bar";
+  const totals = report.totals || {};
+  const summary = document.createElement("p");
+  summary.className = "usage-summary";
+  summary.textContent =
+    `Total: ${formatTokens(totals.input_tokens)} in / ` +
+    `${formatTokens(totals.output_tokens)} out · ` +
+    `${formatTokens(totals.requests)} requests · ${formatCost(totals.cost_usd)}`;
+  const refresh = document.createElement("button");
+  refresh.type = "button";
+  refresh.className = "secondary-button";
+  refresh.textContent = "Reload";
+  refresh.addEventListener("click", loadUsage);
+  bar.append(summary, refresh);
+  container.appendChild(bar);
+
+  const note = document.createElement("p");
+  note.className = "usage-note";
+  note.textContent =
+    "Prices come from the tokencost database plus ~/.fcc/model-pricing.json " +
+    "(edit it for unpriced providers). Tokens are estimates where a provider " +
+    "does not report usage.";
+  container.appendChild(note);
+
+  if (!report.providers || report.providers.length === 0) {
+    const empty = document.createElement("p");
+    empty.textContent = "No usage recorded yet.";
+    container.appendChild(empty);
+    return;
+  }
+
+  report.providers.forEach((provider) => {
+    const card = document.createElement("section");
+    card.className = "usage-provider";
+
+    const head = document.createElement("h3");
+    head.textContent =
+      `${providerName(provider.provider_id)} — ` +
+      `${formatTokens(provider.input_tokens)} in / ` +
+      `${formatTokens(provider.output_tokens)} out · ${formatCost(provider.cost_usd)}`;
+    card.appendChild(head);
+
+    const table = document.createElement("table");
+    table.className = "usage-table";
+    const thead = document.createElement("thead");
+    thead.appendChild(usageRow(["Model", "Input", "Output", "Requests", "Cost"], "th"));
+    table.appendChild(thead);
+    const tbody = document.createElement("tbody");
+    provider.models.forEach((m) => {
+      tbody.appendChild(
+        usageRow([
+          m.model_id,
+          formatTokens(m.input_tokens),
+          formatTokens(m.output_tokens),
+          formatTokens(m.requests),
+          formatCost(m.cost_usd),
+        ]),
+      );
+    });
+    table.appendChild(tbody);
+    card.appendChild(table);
+
+    if (provider.daily && provider.daily.length) {
+      const daily = document.createElement("p");
+      daily.className = "usage-daily";
+      daily.textContent = provider.daily
+        .map(
+          (d) =>
+            `${d.day}: ${formatTokens(d.input_tokens)}/${formatTokens(d.output_tokens)}`,
+        )
+        .join("  ·  ");
+      card.appendChild(daily);
+    }
+
+    container.appendChild(card);
+  });
 }
 
 function renderProviders(providerStatus) {

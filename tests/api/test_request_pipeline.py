@@ -98,6 +98,49 @@ async def test_pipeline_prompt_keyword_overrides_routed_model(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_pipeline_records_token_usage():
+    """A completed request reports (provider_id, provider_model, in, out) tokens."""
+    recorded: list[tuple] = []
+
+    class UsageProvider(FakeProvider):
+        async def stream_response(
+            self,
+            request: Any,
+            input_tokens: int = 0,
+            *,
+            request_id: str | None = None,
+            thinking_enabled: bool | None = None,
+        ) -> AsyncIterator[str]:
+            yield (
+                'event: message_start\ndata: {"type":"message_start",'
+                '"message":{"usage":{"input_tokens":80,"output_tokens":1}}}\n\n'
+            )
+            yield (
+                'event: message_delta\ndata: {"type":"message_delta",'
+                '"usage":{"input_tokens":80,"output_tokens":12}}\n\n'
+            )
+            yield 'event: message_stop\ndata: {"type":"message_stop"}\n\n'
+
+    provider = UsageProvider()
+    pipeline = ApiRequestPipeline(
+        Settings(),
+        provider_getter=lambda _: provider,
+        usage_recorder=lambda p, m, i, o: recorded.append((p, m, i, o)),
+    )
+    request = MessagesRequest(
+        model="nvidia_nim/test-model",
+        max_tokens=100,
+        messages=[Message(role="user", content="hi")],
+    )
+
+    response = pipeline.create_message(request)
+    assert isinstance(response, StreamingResponse)
+    await _streaming_body_text(response)
+
+    assert recorded == [("nvidia_nim", "test-model", 80, 12)]
+
+
+@pytest.mark.asyncio
 async def test_pipeline_provider_execution_passes_routed_request_and_stream_metadata():
     provider = FakeProvider()
     pipeline = ApiRequestPipeline(Settings(), provider_getter=lambda _: provider)

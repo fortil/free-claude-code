@@ -17,8 +17,10 @@ from core.anthropic import get_token_count, get_user_facing_error_message
 from core.anthropic.sse import ANTHROPIC_SSE_RESPONSE_HEADERS
 from core.openai_responses import OpenAIResponsesAdapter
 from core.trace import (
+    UsageRecorder,
     api_messages_request_snapshot,
     log_context_stream,
+    record_usage_stream,
     trace_event,
     traced_async_stream,
 )
@@ -116,12 +118,14 @@ class ApiRequestPipeline:
         model_router: ModelRouter | None = None,
         token_counter: TokenCounter = get_token_count,
         responses_adapter: OpenAIResponsesAdapter | None = None,
+        usage_recorder: UsageRecorder | None = None,
     ) -> None:
         self._settings = settings
         self._provider_getter = provider_getter
         self._model_router = model_router or ModelRouter(settings)
         self._token_counter = token_counter
         self._responses_adapter = responses_adapter or OpenAIResponsesAdapter()
+        self._usage_recorder = usage_recorder
         self._message_intercepts: tuple[MessageIntercept, ...] = (
             self._intercept_web_server_tool,
             self._intercept_local_optimization,
@@ -418,4 +422,13 @@ class ApiRequestPipeline:
         )
         # Tag every log line emitted while the provider streams with the active
         # downstream model, regardless of transport family (openai_chat / native).
-        return log_context_stream(traced, model=routed.resolved.provider_model)
+        tagged = log_context_stream(traced, model=routed.resolved.provider_model)
+        if self._usage_recorder is None:
+            return tagged
+        # Record token usage from the final SSE once the stream completes.
+        return record_usage_stream(
+            tagged,
+            on_usage=self._usage_recorder,
+            provider_id=routed.resolved.provider_id,
+            model_id=routed.resolved.provider_model,
+        )

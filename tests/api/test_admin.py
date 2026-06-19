@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from unittest.mock import patch
 
 import httpx
+import pytest
 from fastapi.testclient import TestClient
 
 from api.admin_config import MASKED_SECRET
@@ -179,6 +181,53 @@ def test_provider_test_endpoint_persists_catalog_and_aliases(monkeypatch, tmp_pa
     assert "kimi/kimi-k2.7-code" in aliases.values()
     assert (tmp_path / ".fcc" / "models.json").is_file()
     assert (tmp_path / ".fcc" / "model-aliases.json").is_file()
+
+
+def test_usage_endpoint_reports_tokens_and_cost(monkeypatch, tmp_path):
+    _set_home(monkeypatch, tmp_path)
+    _clear_process_config(monkeypatch)
+    app = create_app(lifespan_enabled=False)
+
+    from api.usage_tracker import UsageTracker
+
+    tracker = UsageTracker(path=tmp_path / ".fcc" / "usage.json")
+    tracker.record("kimi", "kimi-k2.7-code", 1000, 500)
+    app.state.usage_tracker = tracker
+
+    pricing = tmp_path / ".fcc" / "model-pricing.json"
+    pricing.parent.mkdir(parents=True, exist_ok=True)
+    pricing.write_text(
+        json.dumps(
+            {
+                "prices": {
+                    "kimi/kimi-k2.7-code": {
+                        "input_per_million": 1.0,
+                        "output_per_million": 2.0,
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    response = _local_client(app).get("/admin/api/usage")
+    assert response.status_code == 200
+    body = response.json()
+    provider = next(p for p in body["providers"] if p["provider_id"] == "kimi")
+    assert provider["input_tokens"] == 1000
+    assert provider["output_tokens"] == 500
+    # 1000/1e6*1 + 500/1e6*2 = 0.002
+    assert provider["cost_usd"] == pytest.approx(0.002)
+    assert provider["models"][0]["model_id"] == "kimi-k2.7-code"
+    assert body["totals"]["cost_usd"] == pytest.approx(0.002)
+
+
+def test_usage_endpoint_is_loopback_only(monkeypatch, tmp_path):
+    _set_home(monkeypatch, tmp_path)
+    _clear_process_config(monkeypatch)
+    app = create_app(lifespan_enabled=False)
+    remote = TestClient(app, client=("203.0.113.10", 50000))
+    assert remote.get("/admin/api/usage").status_code == 403
 
 
 def test_admin_apply_writes_complete_managed_env_and_masks_preview(

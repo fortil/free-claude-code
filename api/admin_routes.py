@@ -14,6 +14,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from config.model_store import persist_refreshed_models
+from config.pricing import build_usage_report, seed_pricing_template
 from config.settings import Settings
 from config.settings import get_settings as get_cached_settings
 from providers.registry import ProviderRegistry
@@ -190,6 +191,7 @@ async def test_provider(provider_id: str, request: Request):
     registry.cache_model_infos(provider_id, infos)
     model_ids = sorted(info.model_id for info in infos)
     persist_refreshed_models({provider_id: model_ids})
+    seed_pricing_template({provider_id: model_ids})
     return {
         "provider_id": provider_id,
         "ok": True,
@@ -211,7 +213,17 @@ async def refresh_models(request: Request):
         for provider_id, model_ids in registry.cached_model_ids().items()
     }
     persist_refreshed_models(cached)
+    seed_pricing_template(cached)
     return {"cached_models": cached}
+
+
+@router.get("/admin/api/usage")
+async def usage_report(request: Request):
+    """Return accumulated token usage joined with current prices, per provider."""
+    require_loopback_admin(request)
+    tracker = getattr(request.app.state, "usage_tracker", None)
+    snapshot = tracker.snapshot() if tracker is not None else {"providers": {}}
+    return build_usage_report(snapshot)
 
 
 def _filtered_values(values: dict[str, Any]) -> dict[str, Any]:
