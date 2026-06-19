@@ -389,6 +389,57 @@ def test_responses_parallel_tool_calls_group_into_single_turns() -> None:
     ]
 
 
+def test_responses_text_interleaved_with_parallel_tool_calls_merges() -> None:
+    """Assistant text between tool calls must not break tool_use -> tool_result pairing.
+
+    Regression: a turn that emits tool calls, then preamble text, then more tool
+    calls, with all results at the end, used to send an assistant tool_use message
+    followed by assistant text (not its results), which Kimi rejects with HTTP 400.
+    """
+    payload = _ADAPTER.to_anthropic_payload(
+        {
+            "model": "kimi/kimi-k2.7-code",
+            "input": [
+                {"type": "message", "role": "user", "content": "do it"},
+                {
+                    "type": "function_call",
+                    "call_id": "a",
+                    "name": "exec",
+                    "arguments": "{}",
+                },
+                {
+                    "type": "function_call",
+                    "call_id": "b",
+                    "name": "exec",
+                    "arguments": "{}",
+                },
+                {"type": "message", "role": "assistant", "content": "also checking"},
+                {
+                    "type": "function_call",
+                    "call_id": "c",
+                    "name": "exec",
+                    "arguments": "{}",
+                },
+                {"type": "function_call_output", "call_id": "a", "output": "1"},
+                {"type": "function_call_output", "call_id": "b", "output": "2"},
+                {"type": "function_call_output", "call_id": "c", "output": "3"},
+            ],
+        }
+    )
+
+    roles = [m["role"] for m in payload["messages"]]
+    assert roles == ["user", "assistant", "user"]
+
+    # Every tool_use sits in the single assistant turn that precedes the results.
+    assistant_blocks = payload["messages"][1]["content"]
+    tool_use_ids = [b["id"] for b in assistant_blocks if b["type"] == "tool_use"]
+    assert tool_use_ids == ["a", "b", "c"]
+    assert any(b["type"] == "text" for b in assistant_blocks)
+
+    result_ids = [b["tool_use_id"] for b in payload["messages"][2]["content"]]
+    assert result_ids == ["a", "b", "c"]
+
+
 def test_responses_sequential_tool_calls_stay_separate() -> None:
     """A call answered before the next is not merged into one turn."""
     payload = _ADAPTER.to_anthropic_payload(

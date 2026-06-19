@@ -43,6 +43,13 @@ def convert_request_to_anthropic_payload(
         )
     _append_pending_reasoning(messages, pending_reasoning)
 
+    # Collapse consecutive same-role messages into one. A Responses turn can
+    # interleave text/reasoning between parallel tool calls; without this, an
+    # assistant message holding tool_use blocks can be followed by more assistant
+    # content instead of its tool_results, which native providers (Kimi and the
+    # rest of the anthropic_messages family) reject with HTTP 400.
+    messages = _merge_consecutive_same_role(messages)
+
     if not messages:
         raise ResponsesConversionError("Responses request input must contain a message")
 
@@ -208,6 +215,39 @@ def _append_block_to_open_turn(
         content.append(block)
         return True
     return False
+
+
+def _merge_consecutive_same_role(
+    messages: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Merge adjacent messages that share a role into a single message.
+
+    Content is normalized to a block list and concatenated; ``reasoning_content``
+    is joined. This guarantees the Anthropic invariant that an assistant turn
+    (with all its text and tool_use blocks) is immediately followed by the user
+    turn carrying the matching tool_results.
+    """
+    merged: list[dict[str, Any]] = []
+    for message in messages:
+        if merged and merged[-1].get("role") == message.get("role"):
+            previous = merged[-1]
+            previous["content"] = _content_blocks(previous.get("content")) + (
+                _content_blocks(message.get("content"))
+            )
+            reasoning = combine_reasoning(
+                previous.get("reasoning_content"), message.get("reasoning_content")
+            )
+            if reasoning:
+                previous["reasoning_content"] = reasoning
+        else:
+            merged.append(dict(message))
+    return merged
+
+
+def _content_blocks(content: Any) -> list[dict[str, Any]]:
+    if isinstance(content, str):
+        return [{"type": "text", "text": content}] if content else []
+    return list(content or [])
 
 
 def _append_pending_reasoning(
