@@ -30,6 +30,7 @@ from .models.anthropic import MessagesRequest, TokenCountRequest
 from .models.openai_responses import OpenAIResponsesRequest
 from .models.responses import TokenCountResponse
 from .optimization_handlers import try_optimizations
+from .prompt_model_keyword import apply_prompt_model_keyword
 from .web_tools.egress import WebFetchEgressPolicy
 from .web_tools.request import (
     is_web_server_tool_request,
@@ -130,6 +131,7 @@ class ApiRequestPipeline:
         """Create an Anthropic-compatible message response."""
         try:
             _require_non_empty_messages(request_data.messages)
+            request_data = apply_prompt_model_keyword(request_data)
             routed = self._model_router.resolve_messages_request(request_data)
             self._reject_unsupported_server_tools(routed)
 
@@ -178,6 +180,7 @@ class ApiRequestPipeline:
             )
             response_request = MessagesRequest(**anthropic_payload)
             _require_non_empty_messages(response_request.messages)
+            response_request = apply_prompt_model_keyword(response_request)
             routed = self._model_router.resolve_messages_request(response_request)
             self._reject_unsupported_server_tools(routed)
 

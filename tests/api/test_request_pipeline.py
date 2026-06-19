@@ -67,6 +67,37 @@ async def _streaming_body_text(response: StreamingResponse) -> str:
 
 
 @pytest.mark.asyncio
+async def test_pipeline_prompt_keyword_overrides_routed_model(monkeypatch):
+    """A leading -keyword reroutes the request and is stripped from the prompt."""
+    monkeypatch.setattr(
+        "api.prompt_model_keyword.load_aliases",
+        lambda: {"kimi2.7": "kimi/kimi-k2.7-code"},
+    )
+    seen: dict[str, str] = {}
+    provider = FakeProvider()
+
+    def _getter(provider_id: str) -> FakeProvider:
+        seen["provider_id"] = provider_id
+        return provider
+
+    pipeline = ApiRequestPipeline(Settings(), provider_getter=_getter)
+    request = MessagesRequest(
+        model="nvidia_nim/test-model",
+        max_tokens=100,
+        messages=[Message(role="user", content="-kimi2.7 refactor this")],
+    )
+
+    response = pipeline.create_message(request)
+    assert isinstance(response, StreamingResponse)
+    await _streaming_body_text(response)
+
+    # Routed to the aliased provider + downstream model, token stripped.
+    assert seen["provider_id"] == "kimi"
+    assert provider.requests[0].model == "kimi-k2.7-code"
+    assert provider.requests[0].messages[-1].content == "refactor this"
+
+
+@pytest.mark.asyncio
 async def test_pipeline_provider_execution_passes_routed_request_and_stream_metadata():
     provider = FakeProvider()
     pipeline = ApiRequestPipeline(Settings(), provider_getter=lambda _: provider)
