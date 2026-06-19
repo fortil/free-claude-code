@@ -151,6 +151,36 @@ def test_admin_validate_rejects_bad_model_shape(monkeypatch, tmp_path):
     assert any("provider type" in error for error in body["errors"])
 
 
+def test_provider_test_endpoint_persists_catalog_and_aliases(monkeypatch, tmp_path):
+    _set_home(monkeypatch, tmp_path)
+    _clear_process_config(monkeypatch)
+    app = create_app(lifespan_enabled=False)
+
+    from providers.model_listing import model_infos_from_ids
+    from providers.registry import ProviderRegistry
+
+    class _FakeProvider:
+        async def list_model_infos(self):
+            return model_infos_from_ids({"kimi-k2.7-code", "kimi-k2.6"})
+
+    monkeypatch.setattr(
+        ProviderRegistry, "get", lambda self, provider_id, settings: _FakeProvider()
+    )
+
+    response = _local_client(app).post("/admin/api/providers/kimi/test")
+    assert response.status_code == 200
+    assert response.json()["ok"] is True
+
+    from config.model_store import load_aliases, load_catalog
+
+    catalog = load_catalog()
+    assert sorted(catalog["kimi"]) == ["kimi-k2.6", "kimi-k2.7-code"]
+    aliases = load_aliases()
+    assert "kimi/kimi-k2.7-code" in aliases.values()
+    assert (tmp_path / ".fcc" / "models.json").is_file()
+    assert (tmp_path / ".fcc" / "model-aliases.json").is_file()
+
+
 def test_admin_apply_writes_complete_managed_env_and_masks_preview(
     monkeypatch, tmp_path
 ):

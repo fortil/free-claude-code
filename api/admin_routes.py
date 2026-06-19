@@ -13,6 +13,7 @@ from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
+from config.model_store import persist_refreshed_models
 from config.settings import Settings
 from config.settings import get_settings as get_cached_settings
 from providers.registry import ProviderRegistry
@@ -187,10 +188,12 @@ async def test_provider(provider_id: str, request: Request):
             "error_type": type(exc).__name__,
         }
     registry.cache_model_infos(provider_id, infos)
+    model_ids = sorted(info.model_id for info in infos)
+    persist_refreshed_models({provider_id: model_ids})
     return {
         "provider_id": provider_id,
         "ok": True,
-        "models": sorted(info.model_id for info in infos),
+        "models": model_ids,
     }
 
 
@@ -203,12 +206,12 @@ async def refresh_models(request: Request):
         registry = ProviderRegistry()
         request.app.state.provider_registry = registry
     await registry.refresh_model_list_cache(settings)
-    return {
-        "cached_models": {
-            provider_id: sorted(model_ids)
-            for provider_id, model_ids in registry.cached_model_ids().items()
-        }
+    cached = {
+        provider_id: sorted(model_ids)
+        for provider_id, model_ids in registry.cached_model_ids().items()
     }
+    persist_refreshed_models(cached)
+    return {"cached_models": cached}
 
 
 def _filtered_values(values: dict[str, Any]) -> dict[str, Any]:
