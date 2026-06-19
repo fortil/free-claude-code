@@ -59,6 +59,8 @@ Free Claude Code routes Anthropic Messages API traffic from Claude Code (CLI and
 - `fcc-claude` and `fcc-codex` launchers that read the current Admin UI port and auth token each time they start.
 - 18 provider backends: NVIDIA NIM, OpenRouter, Google AI Studio (Gemini), DeepSeek, Mistral La Plateforme, Mistral Codestral, OpenCode Zen, OpenCode Go, Wafer, Kimi, Cerebras Inference, Groq, OpenAI, Fireworks AI, Z.ai, LM Studio, llama.cpp, and Ollama.
 - Per-model routing for Claude Code: send Opus, Sonnet, Haiku, and fallback traffic to different providers.
+- Pick any discovered model straight from a prompt with a sticky `-<keyword>` (and `-default` to reset); the keyword dictionary lives in `~/.fcc/model-aliases.json` (see [Prompt Keywords](#prompt-keywords)).
+- Per-request active-model logging: a concise `FCC | model: …` line in the `fcc-server` console plus full structured detail in `~/.fcc/logs/server.log`.
 - Native Claude Code `/model` picker support through the proxy's `/v1/models` endpoint (see [Model Picker](#model-picker)).
 - Native Codex `/model` picker support when launched through `fcc-codex`, using a generated local model catalog.
 - Streaming, tool use, reasoning/thinking block handling, and local request optimizations.
@@ -364,6 +366,37 @@ Each model tier can use a different provider by setting `MODEL_OPUS`, `MODEL_SON
 
 For example, you can route Opus to `nvidia_nim/moonshotai/kimi-k2.6`, Sonnet to `open_router/openrouter/free`, Haiku to `lmstudio/qwen3.5-coder`, and keep the fallback `MODEL` on `zai/glm-5.1`.
 
+<a id="prompt-keywords"></a>
+
+### 20. Pick A Model With A Prompt Keyword
+
+Beyond the Admin UI defaults, you can switch models on the fly by starting a prompt with `-<keyword>`:
+
+```text
+-kimi2.7 refactor this module for readability
+```
+
+Free Claude Code resolves `-kimi2.7` to a model, strips the token from the prompt it forwards, and routes the request there. The choice is **persistent**: it is saved to `~/.fcc/active-model.json` and applied to every later request — including ones with no keyword (e.g. after a client compacts/summarizes the conversation) and across server restarts — until you type a different `-<keyword>` or `-default`. `-default` clears the selection and reverts to the Admin UI `MODEL`. Unknown keywords keep the current selection.
+
+**Where the dictionary lives.** Each time you click **Refresh models** in the Admin UI (per provider, or the global refresh), the proxy writes two files under `~/.fcc/`:
+
+- `~/.fcc/models.json` — every model each provider advertises, accumulated and deduplicated across refreshes (a stable lookup table).
+- `~/.fcc/model-aliases.json` — the editable keyword dictionary. It is seeded with a suggested keyword for every discovered model, and your edits are preserved across refreshes.
+
+Curate `model-aliases.json` with short, friendly keywords. Each value is a `provider_id/model_id` reference that the router understands directly:
+
+```json
+{
+  "_help": "Use -<keyword> at the start of a prompt to force that model.",
+  "aliases": {
+    "kimi2.7": "kimi/kimi-k2.7-code",
+    "fast": "groq/llama-3.3-70b-versatile"
+  }
+}
+```
+
+With the above, `-kimi2.7 …` routes to `kimi/kimi-k2.7-code` and `-fast …` to Groq. The selected model is also surfaced in the logs: a concise `FCC | model: …` line in the `fcc-server` console, plus model-tagged detail in `~/.fcc/logs/server.log`.
+
 <a id="connect-your-client"></a>
 
 ## Connect Your Client
@@ -571,7 +604,7 @@ Important pieces:
 - Claude Code sends Anthropic Messages; Codex sends OpenAI Responses SSE to the same proxy.
 - Responses requests convert to Anthropic Messages internally, then share the same model router, normalizer, and provider adapters.
 - `fcc-codex` registers a custom `fcc` provider that points Codex at the local proxy's `/v1/responses` endpoint.
-- Model routing resolves Claude model names to `MODEL_OPUS`, `MODEL_SONNET`, `MODEL_HAIKU`, or `MODEL`.
+- Model routing resolves Claude model names to `MODEL_OPUS`, `MODEL_SONNET`, `MODEL_HAIKU`, or `MODEL`; a leading `-<keyword>` in a prompt overrides this using the alias map in `~/.fcc/model-aliases.json`.
 - NIM, OpenCode Zen, and OpenCode Go use OpenAI chat streaming translated into Anthropic SSE.
 - Wafer, OpenRouter, DeepSeek, Kimi, Fireworks AI, Z.ai, LM Studio, llama.cpp, and Ollama use Anthropic Messages style transports where applicable (with provider-specific quirks and model-list URLs).
 - The proxy normalizes thinking blocks, tool calls, token usage metadata, and provider errors into the shape each client expects.
@@ -590,7 +623,7 @@ free-claude-code/
 ├── providers/             # Provider transports, registry, rate limiting
 ├── messaging/             # Discord/Telegram adapters, sessions, voice
 ├── cli/                   # Package entry points and client CLI process management
-├── config/                # Settings, provider catalog, logging
+├── config/                # Settings, provider catalog, logging, model catalog/alias store
 └── tests/                 # Unit and contract tests
 ```
 
