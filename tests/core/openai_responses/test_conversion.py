@@ -440,6 +440,56 @@ def test_responses_text_interleaved_with_parallel_tool_calls_merges() -> None:
     assert result_ids == ["a", "b", "c"]
 
 
+def test_responses_input_image_data_url_to_anthropic_image() -> None:
+    payload = _ADAPTER.to_anthropic_payload(
+        {
+            "model": "gemini/models/gemini-3.1-pro-preview",
+            "input": [
+                {
+                    "type": "message",
+                    "role": "user",
+                    "content": [
+                        {"type": "input_text", "text": "what is this?"},
+                        {
+                            "type": "input_image",
+                            "image_url": "data:image/png;base64,AAAA",
+                        },
+                    ],
+                }
+            ],
+        }
+    )
+    blocks = payload["messages"][0]["content"]
+    assert blocks[0] == {"type": "text", "text": "what is this?"}
+    assert blocks[1] == {
+        "type": "image",
+        "source": {"type": "base64", "media_type": "image/png", "data": "AAAA"},
+    }
+
+
+def test_responses_input_image_plain_url_to_anthropic_image() -> None:
+    payload = _ADAPTER.to_anthropic_payload(
+        {
+            "model": "gemini/models/gemini-3.1-pro-preview",
+            "input": [
+                {
+                    "type": "message",
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "input_image",
+                            "image_url": "https://example.com/x.png",
+                        }
+                    ],
+                }
+            ],
+        }
+    )
+    assert payload["messages"][0]["content"] == [
+        {"type": "image", "source": {"type": "url", "url": "https://example.com/x.png"}}
+    ]
+
+
 def test_responses_sequential_tool_calls_stay_separate() -> None:
     """A call answered before the next is not merged into one turn."""
     payload = _ADAPTER.to_anthropic_payload(

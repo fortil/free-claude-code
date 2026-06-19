@@ -291,6 +291,11 @@ def _convert_message_content(content: Any) -> str | list[dict[str, Any]]:
             if part_type == "refusal":
                 blocks.append({"type": "text", "text": str(part.get("refusal", ""))})
                 continue
+            if part_type == "input_image":
+                image_block = _image_block_from_part(part)
+                if image_block is not None:
+                    blocks.append(image_block)
+                continue
             raise ResponsesConversionError(
                 f"Unsupported Responses content part type: {part_type!r}"
             )
@@ -307,6 +312,38 @@ def _content_as_text(content: Any) -> str:
     if isinstance(converted, str):
         return converted
     return "\n".join(str(block.get("text", "")) for block in converted)
+
+
+def _image_block_from_part(part: Mapping[str, Any]) -> dict[str, Any] | None:
+    """Convert a Responses ``input_image`` part to an Anthropic image block.
+
+    Handles a data URL (``data:<media_type>;base64,<data>``) and a plain URL.
+    OpenAI ``file_id`` references can't be resolved here and are dropped.
+    """
+    image_url = part.get("image_url")
+    if isinstance(image_url, Mapping):
+        image_url = image_url.get("url")
+    image_url = optional_str(image_url)
+    if not image_url:
+        return None
+    if image_url.startswith("data:"):
+        try:
+            header, data = image_url.split(",", 1)
+        except ValueError:
+            return None
+        if not data:
+            return None
+        meta = header[len("data:") :]
+        media_type = meta.split(";", 1)[0] if meta else ""
+        return {
+            "type": "image",
+            "source": {
+                "type": "base64",
+                "media_type": media_type or "image/png",
+                "data": data,
+            },
+        }
+    return {"type": "image", "source": {"type": "url", "url": image_url}}
 
 
 def _text_from_part(part: Mapping[str, Any]) -> str:
