@@ -254,6 +254,22 @@ def test_usage_endpoint_reports_tokens_and_cost(monkeypatch, tmp_path):
     assert body["totals"]["cost_usd"] == pytest.approx(0.002)
 
 
+def test_usage_endpoint_surfaces_active_model(monkeypatch, tmp_path):
+    _set_home(monkeypatch, tmp_path)
+    _clear_process_config(monkeypatch)
+    app = create_app(lifespan_enabled=False)
+
+    from config.active_model import ActiveModelStore
+
+    store = ActiveModelStore(path=tmp_path / ".fcc" / "active-model.json")
+    store.save("kimi/kimi-k2.6")
+    app.state.active_model = store
+
+    response = _local_client(app).get("/admin/api/usage")
+    assert response.status_code == 200
+    assert response.json()["active_model"] == "kimi/kimi-k2.6"
+
+
 def test_usage_endpoint_is_loopback_only(monkeypatch, tmp_path):
     _set_home(monkeypatch, tmp_path)
     _clear_process_config(monkeypatch)

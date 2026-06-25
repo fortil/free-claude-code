@@ -146,6 +146,67 @@ async def test_pipeline_active_model_persists_across_requests(monkeypatch, tmp_p
 
 
 @pytest.mark.asyncio
+async def test_pipeline_records_usage_under_active_override():
+    """Usage is attributed to the active-override model, not the request's nominal one.
+
+    Regression: a persisted -keyword (e.g. kimi-k2.6) silently routes every request
+    to that model; the Usage tab must then show kimi-k2.6, which is what is really used.
+    """
+    recorded: list[tuple] = []
+
+    class _Store:
+        def load(self) -> str | None:
+            return "kimi/kimi-k2.6"
+
+        def save(self, model_ref: str) -> None:
+            pass
+
+        def clear(self) -> None:
+            pass
+
+    class UsageProvider(FakeProvider):
+        async def stream_response(
+            self,
+            request: Any,
+            input_tokens: int = 0,
+            *,
+            request_id: str | None = None,
+            thinking_enabled: bool | None = None,
+        ) -> AsyncIterator[str]:
+            self.requests.append(request)
+            yield (
+                'event: message_start\ndata: {"type":"message_start",'
+                '"message":{"usage":{"input_tokens":50,"output_tokens":1}}}\n\n'
+            )
+            yield (
+                'event: message_delta\ndata: {"type":"message_delta",'
+                '"usage":{"input_tokens":50,"output_tokens":9}}\n\n'
+            )
+            yield 'event: message_stop\ndata: {"type":"message_stop"}\n\n'
+
+    provider = UsageProvider()
+    pipeline = ApiRequestPipeline(
+        Settings(),
+        provider_getter=lambda _: provider,
+        usage_recorder=lambda p, m, i, o: recorded.append((p, m, i, o)),
+        active_store=_Store(),
+    )
+    # The request nominally asks for nvidia_nim/test-model, but the active override wins.
+    request = MessagesRequest(
+        model="nvidia_nim/test-model",
+        max_tokens=100,
+        messages=[Message(role="user", content="plain prompt, no keyword")],
+    )
+
+    response = pipeline.create_message(request)
+    assert isinstance(response, StreamingResponse)
+    await _streaming_body_text(response)
+
+    assert recorded == [("kimi", "kimi-k2.6", 50, 9)]
+    assert provider.requests[0].model == "kimi-k2.6"
+
+
+@pytest.mark.asyncio
 async def test_pipeline_records_token_usage():
     """A completed request reports (provider_id, provider_model, in, out) tokens."""
     recorded: list[tuple] = []

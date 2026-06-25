@@ -222,6 +222,15 @@ function renderUsage(report) {
   bar.append(summary, refresh);
   container.appendChild(bar);
 
+  if (report.active_model) {
+    const active = document.createElement("p");
+    active.className = "usage-active";
+    active.textContent =
+      `Active model override: ${report.active_model} — every request routes ` +
+      "here (overrides MODEL) until you send a different -keyword or -default.";
+    container.appendChild(active);
+  }
+
   const note = document.createElement("p");
   note.className = "usage-note";
   note.textContent =

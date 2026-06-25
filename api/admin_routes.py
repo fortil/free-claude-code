@@ -225,7 +225,12 @@ async def usage_report(request: Request):
     require_loopback_admin(request)
     tracker = getattr(request.app.state, "usage_tracker", None)
     snapshot = tracker.snapshot() if tracker is not None else {"providers": {}}
-    return build_usage_report(snapshot)
+    report = build_usage_report(snapshot)
+    # Surface the persistent -keyword override so it is obvious which model every
+    # request is actually routed to (it overrides the configured MODEL default).
+    active = getattr(request.app.state, "active_model", None)
+    report["active_model"] = active.load() if active is not None else None
+    return report
 
 
 def _filtered_values(values: dict[str, Any]) -> dict[str, Any]:

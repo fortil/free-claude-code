@@ -471,6 +471,13 @@ textarea {
   margin: 0;
 }
 
+.usage-active {
+  color: var(--warn);
+  font-size: 0.85rem;
+  font-weight: 600;
+  margin: 4px 0;
+}
+
 .usage-note {
   color: var(--muted);
   font-size: 0.85rem;
