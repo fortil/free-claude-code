@@ -373,6 +373,8 @@ Each model tier can use a different provider by setting `MODEL_OPUS`, `MODEL_SON
 
 For example, you can route Opus to `nvidia_nim/moonshotai/kimi-k2.6`, Sonnet to `open_router/openrouter/free`, Haiku to `lmstudio/qwen3.5-coder`, and keep the fallback `MODEL` on `zai/glm-5.1`.
 
+**Passthrough mode (empty `MODEL`).** Leave `MODEL` blank to stop forcing a fallback. FCC then forwards whatever the client routes to: a provider-prefixed slug (`kimi/kimi-k2.7-code`), one of the gateway models FCC advertises, a `-<keyword>`, or the persisted active model. A **bare, unmapped** Claude name (one that does not match `MODEL_OPUS`/`MODEL_SONNET`/`MODEL_HAIKU` and carries no provider prefix) returns a clear `400` explaining how to route it — FCC never silently picks a provider for you. If you use passthrough with Claude Code, set `MODEL_HAIKU` so its background `haiku` calls (titles, summaries) still resolve.
+
 <a id="prompt-keywords"></a>
 
 ### 20. Pick A Model With A Prompt Keyword

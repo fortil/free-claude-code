@@ -434,7 +434,12 @@ FIELDS: tuple[ConfigFieldSpec, ...] = (
         "models",
         settings_attr="model",
         default="nvidia_nim/nvidia/nemotron-3-super-120b-a12b",
-        description="Fallback provider/model route for all Claude model names.",
+        description=(
+            "Fallback provider/model route for all Claude model names. Leave "
+            "empty for passthrough: FCC forwards the client's provider/model, "
+            "gateway model, -keyword, or active model; a bare unmapped name "
+            "(not matching MODEL_OPUS/SONNET/HAIKU) returns a 400."
+        ),
     ),
     ConfigFieldSpec(
         "MODEL_OPUS",

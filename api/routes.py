@@ -107,7 +107,7 @@ async def root(
     return {
         "status": "ok",
         "provider": settings.provider_type,
-        "model": settings.model,
+        "model": settings.model or "",
     }
 
 

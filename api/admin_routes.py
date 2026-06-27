@@ -151,7 +151,7 @@ async def admin_status(request: Request):
         "status": "running",
         "host": settings.host,
         "port": settings.port,
-        "model": settings.model,
+        "model": settings.model or "",
         "provider": settings.provider_type,
         "pending_fields": getattr(request.app.state, "admin_pending_fields", []),
         "provider_status": provider_config_status(),

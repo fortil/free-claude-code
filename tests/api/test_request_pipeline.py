@@ -342,6 +342,50 @@ async def test_pipeline_logs_active_model_and_tags_provider_stream(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_pipeline_passthrough_bare_name_raises_400():
+    """MODEL empty + bare unmapped name -> InvalidRequestError (400), no provider call."""
+    from providers.exceptions import InvalidRequestError
+
+    settings = Settings()
+    settings.model = None
+    settings.model_opus = settings.model_sonnet = settings.model_haiku = None
+    provider = FakeProvider()
+    pipeline = ApiRequestPipeline(settings, provider_getter=lambda _: provider)
+    request = MessagesRequest(
+        model="claude-sonnet-4-20250514",
+        max_tokens=100,
+        messages=[Message(role="user", content="hi")],
+    )
+
+    with pytest.raises(InvalidRequestError) as exc_info:
+        pipeline.create_message(request)
+
+    assert exc_info.value.status_code == 400
+    assert "MODEL is empty" in str(exc_info.value)
+    assert provider.requests == []
+
+
+@pytest.mark.asyncio
+async def test_pipeline_passthrough_provider_model_streams():
+    """MODEL empty + client provider/model -> routes through and streams normally."""
+    settings = Settings()
+    settings.model = None
+    provider = FakeProvider()
+    pipeline = ApiRequestPipeline(settings, provider_getter=lambda _: provider)
+    request = MessagesRequest(
+        model="kimi/kimi-k2.7-code",
+        max_tokens=100,
+        messages=[Message(role="user", content="hi")],
+    )
+
+    response = pipeline.create_message(request)
+    assert isinstance(response, StreamingResponse)
+    await _streaming_body_text(response)
+
+    assert provider.requests[0].model == "kimi-k2.7-code"
+
+
+@pytest.mark.asyncio
 async def test_pipeline_responses_bypass_message_only_optimizations():
     provider = FakeProvider()
     pipeline = ApiRequestPipeline(Settings(), provider_getter=lambda _: provider)

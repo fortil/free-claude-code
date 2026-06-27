@@ -153,6 +153,22 @@ def test_admin_validate_rejects_bad_model_shape(monkeypatch, tmp_path):
     assert any("provider type" in error for error in body["errors"])
 
 
+def test_admin_validate_accepts_empty_model_for_passthrough(monkeypatch, tmp_path):
+    _set_home(monkeypatch, tmp_path)
+    _clear_process_config(monkeypatch)
+    app = create_app(lifespan_enabled=False)
+
+    response = _local_client(app).post(
+        "/admin/api/config/validate",
+        json={"values": {"MODEL": ""}},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["valid"] is True
+    assert not body["errors"]
+
+
 def test_provider_test_endpoint_persists_catalog_and_aliases(monkeypatch, tmp_path):
     _set_home(monkeypatch, tmp_path)
     _clear_process_config(monkeypatch)

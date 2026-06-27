@@ -8,6 +8,7 @@ from loguru import logger
 
 from config.provider_ids import SUPPORTED_PROVIDER_IDS
 from config.settings import Settings
+from providers.exceptions import InvalidRequestError
 
 from .gateway_model_ids import decode_gateway_model_id
 from .models.anthropic import MessagesRequest, TokenCountRequest
@@ -68,6 +69,14 @@ class ModelRouter:
             )
 
         provider_model_ref = self._settings.resolve_model(claude_model_name)
+        if not provider_model_ref:
+            raise InvalidRequestError(
+                f"No route for model '{claude_model_name}'. MODEL is empty "
+                "(passthrough mode): send a provider/model (e.g. "
+                "'kimi/kimi-k2.7-code'), pick one of the models FCC advertises, "
+                "use a -keyword, or set MODEL / MODEL_OPUS / MODEL_SONNET / "
+                "MODEL_HAIKU."
+            )
         thinking_enabled = self._settings.resolve_thinking(claude_model_name)
         provider_id = Settings.parse_provider_type(provider_model_ref)
         provider_model = Settings.parse_model_name(provider_model_ref)
