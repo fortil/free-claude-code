@@ -59,6 +59,7 @@ Free Claude Code routes Anthropic Messages API traffic from Claude Code (CLI and
 - `fcc-claude` and `fcc-codex` launchers that read the current Admin UI port and auth token each time they start.
 - 18 provider backends: NVIDIA NIM, OpenRouter, Google AI Studio (Gemini), DeepSeek, Mistral La Plateforme, Mistral Codestral, OpenCode Zen, OpenCode Go, Wafer, Kimi, Cerebras Inference, Groq, OpenAI, Fireworks AI, Z.ai, LM Studio, llama.cpp, and Ollama.
 - Per-model routing for Claude Code: send Opus, Sonnet, Haiku, and fallback traffic to different providers.
+- **Passthrough mode**: leave `MODEL` empty to forward whatever model/provider the client routes to, instead of forcing a fallback (see [Passthrough Mode](#passthrough)).
 - Pick any discovered model straight from a prompt with a **persistent** `-<keyword>` (and `-default` to reset); the choice survives context compaction and restarts, and the keyword dictionary lives in `~/.fcc/model-aliases.json` (see [Prompt Keywords](#prompt-keywords)).
 - **Token + dollar usage tracking** per provider/model/day, viewable in an Admin UI **Usage** tab (see [Usage Tracking](#usage-tracking)).
 - Per-request active-model logging: a concise `FCC | model: …` line in the `fcc-server` console plus full structured detail in `~/.fcc/logs/server.log`.
@@ -373,6 +374,8 @@ Each model tier can use a different provider by setting `MODEL_OPUS`, `MODEL_SON
 
 For example, you can route Opus to `nvidia_nim/moonshotai/kimi-k2.6`, Sonnet to `open_router/openrouter/free`, Haiku to `lmstudio/qwen3.5-coder`, and keep the fallback `MODEL` on `zai/glm-5.1`.
 
+<a id="passthrough"></a>
+
 **Passthrough mode (empty `MODEL`).** Leave `MODEL` blank to stop forcing a fallback. FCC then forwards whatever the client routes to: a provider-prefixed slug (`kimi/kimi-k2.7-code`), one of the gateway models FCC advertises, a `-<keyword>`, or the persisted active model. A **bare, unmapped** Claude name (one that does not match `MODEL_OPUS`/`MODEL_SONNET`/`MODEL_HAIKU` and carries no provider prefix) returns a clear `400` explaining how to route it — FCC never silently picks a provider for you. If you use passthrough with Claude Code, set `MODEL_HAIKU` so its background `haiku` calls (titles, summaries) still resolve.
 
 <a id="prompt-keywords"></a>
@@ -392,6 +395,8 @@ Free Claude Code resolves `-kimi2.7` to a model, strips the token from the promp
 - `~/.fcc/models.json` — every model each provider advertises, accumulated and deduplicated across refreshes (a stable lookup table).
 - `~/.fcc/model-aliases.json` — the editable keyword dictionary. It is seeded with a suggested keyword for every discovered model, and your edits are preserved across refreshes.
 
+**Gate on-disk seeding with `UPDATE_MODELS_ON_REFRESH`.** By default (`true`), a **Refresh models** updates `models.json`, `model-aliases.json`, and the `model-pricing.json` template on disk. Set `UPDATE_MODELS_ON_REFRESH=false` to refresh only the in-memory model list — the proxy still discovers and serves the latest models, but it never re-seeds those files, so your curated keywords and prices stay exactly as you left them.
+
 Curate `model-aliases.json` with short, friendly keywords. Each value is a `provider_id/model_id` reference that the router understands directly:
 
 ```json
@@ -410,7 +415,9 @@ With the above, `-kimi2.7 …` routes to `kimi/kimi-k2.7-code` and `-fast …` t
 
 ### 21. Track Token & Dollar Usage
 
-Free Claude Code records how many tokens — and how many dollars — you spend per provider. Every completed request's usage is accumulated to `~/.fcc/usage.json`, broken down by provider, model, and day. Open `/admin` and pick the **Usage** tab for a per-provider table (input/output tokens, requests, and cost) with a per-model breakdown.
+Free Claude Code records how many tokens — and how many dollars — you spend per provider. Every completed request's usage is accumulated to `~/.fcc/usage.json`, broken down by provider, model, and day. Open `/admin` and pick the **Usage** tab for a per-provider table (input/output tokens, requests, and cost) with a per-model breakdown. Usage is persisted per request, so it survives restarts and reboots.
+
+If a `-<keyword>` or persisted active model is currently overriding your configured `MODEL`, the Usage tab shows an **Active model override** banner at the top — so it is always obvious which model every request is really routed to (handy when usage shows up under a model you did not expect).
 
 **Pricing is hybrid.** Mainstream models (OpenAI/Anthropic/Gemini, …) are priced automatically from the bundled `tokencost` database. For the providers it does not cover (NVIDIA NIM, Kimi, Wafer, Z.ai, …), set prices yourself in `~/.fcc/model-pricing.json` — a **Refresh models** seeds an entry per discovered model that you fill in (USD per 1,000,000 tokens):
 
@@ -636,7 +643,7 @@ Important pieces:
 - Claude Code sends Anthropic Messages; Codex sends OpenAI Responses SSE to the same proxy.
 - Responses requests convert to Anthropic Messages internally, then share the same model router, normalizer, and provider adapters.
 - `fcc-codex` registers a custom `fcc` provider that points Codex at the local proxy's `/v1/responses` endpoint.
-- Model routing resolves Claude model names to `MODEL_OPUS`, `MODEL_SONNET`, `MODEL_HAIKU`, or `MODEL`; a leading `-<keyword>` in a prompt overrides this using the alias map in `~/.fcc/model-aliases.json` and persists the choice in `~/.fcc/active-model.json`.
+- Model routing resolves Claude model names to `MODEL_OPUS`, `MODEL_SONNET`, `MODEL_HAIKU`, or `MODEL`; a leading `-<keyword>` in a prompt overrides this using the alias map in `~/.fcc/model-aliases.json` and persists the choice in `~/.fcc/active-model.json`. When `MODEL` is empty (passthrough), the client's own provider/model is forwarded unchanged, and a bare name that cannot be routed returns a clear `400`.
 - NIM, OpenCode Zen, and OpenCode Go use OpenAI chat streaming translated into Anthropic SSE.
 - Wafer, OpenRouter, DeepSeek, Kimi, Fireworks AI, Z.ai, LM Studio, llama.cpp, and Ollama use Anthropic Messages style transports where applicable (with provider-specific quirks and model-list URLs).
 - OpenAI `*-codex` / `-pro` models are sent to OpenAI's Responses API and its events are translated back into Anthropic SSE; other OpenAI models use Chat Completions.
