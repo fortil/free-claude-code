@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from unittest.mock import patch
 
 import pytest
 
@@ -148,3 +149,22 @@ def test_seed_pricing_template_keeps_existing(tmp_path) -> None:
         "output_per_million": None,
     }
     assert "openai/gpt-4o" in prices
+
+
+def test_load_overrides_corrupt_file_warns_visibly(tmp_path) -> None:
+    bad = tmp_path / "bad.json"
+    bad.write_text("not json", encoding="utf-8")
+    with patch("config.json_store.logger.bind") as mock_bind:
+        assert load_pricing_overrides(bad) == {}
+    mock_bind.assert_called_once_with(console=True)
+
+
+def test_seed_pricing_template_write_failure_warns_visibly(tmp_path) -> None:
+    path = tmp_path / "model-pricing.json"
+    with (
+        patch("config.pricing.write_json", side_effect=OSError("disk full")),
+        patch("config.pricing.logger.bind") as mock_bind,
+    ):
+        result = seed_pricing_template({"kimi": ["kimi-k2.7-code"]}, path)
+    assert result is False
+    mock_bind.assert_called_once_with(console=True)

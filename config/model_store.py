@@ -18,17 +18,13 @@ persist must never break a model refresh.
 
 from __future__ import annotations
 
-import contextlib
-import json
-import os
 import re
-import tempfile
 from collections.abc import Iterable, Mapping
 from pathlib import Path
-from typing import Any
 
 from loguru import logger
 
+from .json_store import read_json, write_json
 from .paths import model_aliases_path, models_catalog_path
 
 _CATALOG_HELP = (
@@ -59,7 +55,7 @@ def suggest_keyword(model_id: str) -> str:
 
 def load_catalog(path: Path | None = None) -> dict[str, list[str]]:
     """Load the discovered-models catalog as ``{provider_id: [model_id, ...]}``."""
-    data = _read_json(path or models_catalog_path())
+    data = read_json(path or models_catalog_path())
     providers = data.get("providers") if isinstance(data, dict) else None
     if not isinstance(providers, dict):
         return {}
@@ -87,7 +83,7 @@ def merge_catalog(
 
 def load_aliases(path: Path | None = None) -> dict[str, str]:
     """Load the keyword -> model-reference alias map."""
-    data = _read_json(path or model_aliases_path())
+    data = read_json(path or model_aliases_path())
     aliases = data.get("aliases") if isinstance(data, dict) else None
     if not isinstance(aliases, dict):
         return {}
@@ -139,11 +135,11 @@ def persist_refreshed_models(
         new_models = sum(len(merged[p]) for p in merged) - sum(
             len(existing_catalog.get(p, [])) for p in merged
         )
-        _write_json(catalog_file, {"_help": _CATALOG_HELP, "providers": merged})
+        write_json(catalog_file, {"_help": _CATALOG_HELP, "providers": merged})
 
         existing_aliases = load_aliases(aliases_file)
         seeded = seed_aliases(merged, existing_aliases)
-        _write_json(aliases_file, {"_help": _ALIASES_HELP, "aliases": seeded})
+        write_json(aliases_file, {"_help": _ALIASES_HELP, "aliases": seeded})
 
         return {
             "providers": len(merged),
@@ -153,7 +149,7 @@ def persist_refreshed_models(
             "new_aliases": len(seeded) - len(existing_aliases),
         }
     except OSError as exc:
-        logger.warning("Could not persist refreshed models: {}", exc)
+        logger.bind(console=True).warning("Could not persist refreshed models: {}", exc)
         return {}
 
 
@@ -168,32 +164,3 @@ def _unique_keyword(base: str, provider_id: str, aliases: Mapping[str, str]) -> 
     while f"{prefixed}-{counter}" in aliases:
         counter += 1
     return f"{prefixed}-{counter}"
-
-
-def _read_json(path: Path) -> Any:
-    """Return parsed JSON, or ``None`` when the file is missing/unreadable."""
-    try:
-        text = path.read_text(encoding="utf-8")
-    except OSError:
-        return None
-    try:
-        return json.loads(text)
-    except json.JSONDecodeError:
-        return None
-
-
-def _write_json(path: Path, data: Any) -> None:
-    """Atomically write JSON to ``path`` (temp file in the same dir + replace)."""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fd, tmp_name = tempfile.mkstemp(
-        dir=path.parent, prefix=f".{path.name}.", suffix=".tmp"
-    )
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as handle:
-            json.dump(data, handle, indent=2, ensure_ascii=False, sort_keys=True)
-            handle.write("\n")
-        os.replace(tmp_name, path)
-    except OSError:
-        with contextlib.suppress(OSError):
-            os.unlink(tmp_name)
-        raise

@@ -10,16 +10,13 @@ with no known price yields ``None`` (tokens are still tracked, cost is unknown).
 
 from __future__ import annotations
 
-import contextlib
-import json
-import os
-import tempfile
 from collections.abc import Iterable, Mapping
 from pathlib import Path
 from typing import Any, NamedTuple
 
 from loguru import logger
 
+from .json_store import read_json, write_json
 from .paths import model_pricing_path
 
 _PRICING_HELP = (
@@ -38,7 +35,7 @@ class ModelPrice(NamedTuple):
 
 def load_pricing_overrides(path: Path | None = None) -> dict[str, ModelPrice]:
     """Load the user price overrides as ``{provider/model: ModelPrice}``."""
-    data = _read_json(path or model_pricing_path())
+    data = read_json(path or model_pricing_path())
     prices = data.get("prices") if isinstance(data, dict) else None
     if not isinstance(prices, dict):
         return {}
@@ -160,7 +157,7 @@ def seed_pricing_template(
     """
     pricing_path = path or model_pricing_path()
     try:
-        document = _read_json(pricing_path)
+        document = read_json(pricing_path)
         prices = document.get("prices") if isinstance(document, dict) else None
         prices = dict(prices) if isinstance(prices, dict) else {}
         for provider_id in sorted(catalog):
@@ -169,10 +166,10 @@ def seed_pricing_template(
                     f"{provider_id}/{model_id}",
                     {"input_per_million": None, "output_per_million": None},
                 )
-        _write_json(pricing_path, {"_help": _PRICING_HELP, "prices": prices})
+        write_json(pricing_path, {"_help": _PRICING_HELP, "prices": prices})
         return True
     except OSError as exc:
-        logger.warning("Could not seed pricing template: {}", exc)
+        logger.bind(console=True).warning("Could not seed pricing template: {}", exc)
         return False
 
 
@@ -217,30 +214,3 @@ def _tokencost_candidates(provider_id: str, model_id: str) -> list[str]:
         candidates.append(tail)
     seen: set[str] = set()
     return [c for c in candidates if c and not (c in seen or seen.add(c))]
-
-
-def _read_json(path: Path) -> Any:
-    try:
-        text = path.read_text(encoding="utf-8")
-    except OSError:
-        return None
-    try:
-        return json.loads(text)
-    except json.JSONDecodeError:
-        return None
-
-
-def _write_json(path: Path, data: Any) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fd, tmp_name = tempfile.mkstemp(
-        dir=path.parent, prefix=f".{path.name}.", suffix=".tmp"
-    )
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as handle:
-            json.dump(data, handle, indent=2, ensure_ascii=False, sort_keys=True)
-            handle.write("\n")
-        os.replace(tmp_name, path)
-    except OSError:
-        with contextlib.suppress(OSError):
-            os.unlink(tmp_name)
-        raise

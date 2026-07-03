@@ -68,6 +68,21 @@ class ModelRouter:
                 thinking_enabled=thinking_enabled,
             )
 
+        if "/" in claude_model_name:
+            # A slash means the caller attempted an explicit provider/model or
+            # gateway route (e.g. a typo'd provider id, or an unsupported one
+            # inside a gateway-shaped id) that didn't resolve above. Such a
+            # string is never a legitimate bare Claude/GPT model name (those
+            # never contain '/'), so it must error instead of silently falling
+            # through to substring tier matching below -- which could route a
+            # mistyped "antrhopic/claude-opus-..." to MODEL_OPUS just because
+            # the string happens to contain "opus".
+            raise InvalidRequestError(
+                f"Unsupported provider in model '{claude_model_name}'. "
+                f"Valid providers: {', '.join(sorted(SUPPORTED_PROVIDER_IDS))}. "
+                "Format: provider_id/model_id."
+            )
+
         provider_model_ref = self._settings.resolve_model(claude_model_name)
         if not provider_model_ref:
             raise InvalidRequestError(

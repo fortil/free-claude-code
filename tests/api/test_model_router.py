@@ -261,3 +261,34 @@ def test_configured_model_still_maps_bare_name(settings):
 
     assert resolved.provider_id == "nvidia_nim"
     assert resolved.provider_model == "fallback-model"
+
+
+# ---- Malformed provider prefix must error, never silently misroute ----
+
+
+def test_typo_provider_prefix_raises_instead_of_substring_matching(settings):
+    """Regression: a slash-shaped string with an unsupported provider must error,
+    not silently fall through to tier substring matching.
+
+    A one-character typo ("antrhopic" for "anthropic") meant the string was
+    treated as a bare Claude name instead of a rejected direct route, and it
+    silently routed to MODEL_OPUS just because "opus" is a substring of the
+    (mistyped) model string -- a completely different provider/model than
+    either the literal string or the caller intended.
+    """
+    settings.model_opus = "kimi/kimi-k2.7-thinking"
+
+    with pytest.raises(InvalidRequestError) as exc_info:
+        ModelRouter(settings).resolve("antrhopic/claude-opus-4-20250514")
+
+    assert exc_info.value.status_code == 400
+    assert "antrhopic/claude-opus-4-20250514" in str(exc_info.value)
+
+
+def test_gateway_shaped_id_with_unsupported_provider_raises(settings):
+    """A well-formed gateway id (anthropic/<provider>/<model>) whose inner
+    provider is unsupported must also error, not substring-match a tier."""
+    settings.model_sonnet = "kimi/kimi-k2.7-thinking"
+
+    with pytest.raises(InvalidRequestError):
+        ModelRouter(settings).resolve("anthropic/not_a_provider/claude-sonnet-x")

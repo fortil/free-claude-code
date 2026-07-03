@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from unittest.mock import patch
 
 from config.usage_store import load_usage, record_usage, save_usage
 
@@ -12,6 +13,24 @@ def test_load_missing_or_malformed_returns_empty(tmp_path) -> None:
     bad = tmp_path / "bad.json"
     bad.write_text("not json", encoding="utf-8")
     assert load_usage(bad) == {"providers": {}}
+
+
+def test_load_corrupt_file_warns_visibly(tmp_path) -> None:
+    bad = tmp_path / "bad.json"
+    bad.write_text("not json", encoding="utf-8")
+    with patch("config.json_store.logger.bind") as mock_bind:
+        load_usage(bad)
+    mock_bind.assert_called_once_with(console=True)
+
+
+def test_save_write_failure_warns_visibly(tmp_path) -> None:
+    with (
+        patch("config.usage_store.write_json", side_effect=OSError("disk full")),
+        patch("config.usage_store.logger.bind") as mock_bind,
+    ):
+        result = save_usage({"providers": {}}, tmp_path / "usage.json")
+    assert result is False
+    mock_bind.assert_called_once_with(console=True)
 
 
 def test_record_accumulates_model_and_day_buckets() -> None:

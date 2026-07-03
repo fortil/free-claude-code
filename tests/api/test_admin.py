@@ -229,6 +229,39 @@ def test_provider_test_endpoint_persists_catalog_and_aliases(monkeypatch, tmp_pa
     assert (tmp_path / ".fcc" / "model-aliases.json").is_file()
 
 
+def test_provider_test_endpoint_respects_blanked_local_base_url(monkeypatch, tmp_path):
+    """Regression: an explicitly-cleared local base URL must not silently fall
+    back to the hardcoded default (e.g. http://localhost:11434 for Ollama).
+
+    The status card already shows "Missing URL" when OLLAMA_BASE_URL is blank;
+    clicking "Test" on that same card used to silently reconnect to the default
+    instead, reconnecting to a provider the user deliberately disabled.
+    """
+    _set_home(monkeypatch, tmp_path)
+    _clear_process_config(monkeypatch)
+    monkeypatch.setenv("OLLAMA_BASE_URL", "")
+    app = create_app(lifespan_enabled=False)
+
+    from providers.registry import ProviderRegistry
+
+    called = False
+
+    def _unexpected_get(self, provider_id, settings):
+        nonlocal called
+        called = True
+        raise AssertionError("must not build a provider for a blanked base URL")
+
+    monkeypatch.setattr(ProviderRegistry, "get", _unexpected_get)
+
+    response = _local_client(app).post("/admin/api/providers/ollama/test")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["ok"] is False
+    assert body["error_type"] == "MissingBaseURL"
+    assert called is False
+
+
 def test_refresh_skips_persistence_when_flag_off(monkeypatch, tmp_path):
     _set_home(monkeypatch, tmp_path)
     _clear_process_config(monkeypatch)

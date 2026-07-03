@@ -10,7 +10,14 @@ conversation and the keyword text is gone — until a new ``-keyword`` or
 ``-default`` changes it. ``-default`` clears the persisted selection and reverts
 to the configured default. Without a store, the keyword only affects the current
 request. Recognized keyword tokens are stripped so the model never sees the
-directive; unknown keywords keep the persisted active model (if any).
+directive; unknown keywords keep the persisted active model (if any) instead of
+dropping a deliberate selection on a typo, and always log a visible console
+warning — a silent fallback is indistinguishable from the keyword having
+worked. An unrecognized ``-<token>`` is deliberately left in the prompt: there
+is no reliable way to tell a failed directive (``-qwen``) apart from ordinary
+text that merely starts with a hyphen (``-1``, ``-Werror``, ``-inf``), and
+silently discarding user content is worse than a stray token reaching the
+model.
 """
 
 from __future__ import annotations
@@ -74,7 +81,23 @@ def apply_prompt_model_keyword(
             return _apply_model(request, candidates, aliases, model_ref=model_ref)
         # Unrecognized keyword: do not change the model here; fall through to the
         # persisted active model so a typo doesn't drop a deliberate selection.
-        logger.debug("prompt model keyword '-{}' is not a known alias", keyword)
+        # Always logged loudly — a silent fallback here is indistinguishable
+        # from the keyword having worked. The token itself is intentionally
+        # NOT stripped (see module docstring): there is no reliable way to
+        # tell a failed directive apart from ordinary hyphen-prefixed text.
+        fallback = active_store.load() if active_store is not None else None
+        logger.bind(console=True).warning(
+            "keyword '-{}' not found in model-aliases.json ({})",
+            keyword,
+            f"using active model: {fallback}"
+            if fallback
+            else "no active override, using requested model",
+        )
+        if fallback:
+            updated = request.model_copy(deep=True)
+            updated.model = fallback
+            return updated
+        return request
 
     active_model = active_store.load() if active_store is not None else None
     if active_model:

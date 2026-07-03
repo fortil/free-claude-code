@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from unittest.mock import patch
+
 from api.models.anthropic import ContentBlockText, Message, MessagesRequest
 from api.prompt_model_keyword import apply_prompt_model_keyword
 
@@ -65,6 +67,27 @@ def test_unknown_keyword_leaves_request_untouched() -> None:
     out = apply_prompt_model_keyword(request, aliases_loader=_aliases)
     assert out is request
     assert out.messages[-1].content == "-unknownmodel do something"
+
+
+def test_unknown_keyword_does_not_strip_ordinary_hyphen_prefixed_content() -> None:
+    """Regression: an unresolved keyword-shaped token must not destroy user content.
+
+    A prior fix (to stop "-qwen" from leaking into the prompt) unconditionally
+    stripped every leading "-<token>", which also silently truncated ordinary
+    text that merely starts with a hyphen (negative numbers, CLI flags) — there
+    is no reliable way to tell these apart from a failed keyword directive, so
+    unrecognized tokens must be left as-is.
+    """
+    cases = [
+        "-1 is a negative number, explain floating point",
+        "-v --help please explain this CLI flag",
+        "-Werror is a gcc flag, what does it do",
+        "-inf and +inf in IEEE754",
+    ]
+    for prompt in cases:
+        out = apply_prompt_model_keyword(_request(prompt), aliases_loader=_aliases)
+        assert out.messages[-1].content == prompt
+        assert out.model == "nvidia_nim/test-model"
 
 
 def test_no_leading_keyword_is_untouched() -> None:
@@ -214,6 +237,43 @@ def test_unknown_keyword_keeps_persisted_active_model() -> None:
     )
     assert out.model == "kimi/kimi-k2.7-code"
     assert store.model == "kimi/kimi-k2.7-code"
+    # The unresolved token is left as-is; only the model changes.
+    assert out.messages[-1].content == "-typo keep going"
+
+
+def test_unknown_keyword_with_active_model_logs_visible_console_warning() -> None:
+    """Regression: a silent fallback is indistinguishable from the keyword working.
+
+    -qwen resolved to nothing (Ollama was never refreshed into the alias file),
+    so the request silently kept routing to a stale active model with no signal
+    the operator could see. The fallback must now log a console-visible warning.
+    """
+    store = FakeActiveStore("zai/glm-5.2")
+    with patch("api.prompt_model_keyword.logger.bind") as mock_bind:
+        apply_prompt_model_keyword(
+            _request("-qwen what can we do?"),
+            aliases_loader=_aliases,
+            active_store=store,
+        )
+
+    mock_bind.assert_called_once_with(console=True)
+    mock_bind.return_value.warning.assert_called_once()
+    args = mock_bind.return_value.warning.call_args[0]
+    assert args[1] == "qwen"
+    assert "zai/glm-5.2" in args[2]
+
+
+def test_unknown_keyword_without_active_model_logs_visible_console_warning() -> None:
+    with patch("api.prompt_model_keyword.logger.bind") as mock_bind:
+        out = apply_prompt_model_keyword(
+            _request("-qwen what can we do?"), aliases_loader=_aliases
+        )
+
+    assert out.model == "nvidia_nim/test-model"
+    mock_bind.assert_called_once_with(console=True)
+    args = mock_bind.return_value.warning.call_args[0]
+    assert args[1] == "qwen"
+    assert "no active override" in args[2]
 
 
 def test_default_clears_active_store_and_reverts() -> None:

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from unittest.mock import patch
 
 from config.model_store import (
     load_aliases,
@@ -41,6 +42,41 @@ def test_load_catalog_missing_or_malformed_returns_empty(tmp_path) -> None:
     bad = tmp_path / "bad.json"
     bad.write_text("not json", encoding="utf-8")
     assert load_catalog(bad) == {}
+
+
+def test_load_catalog_corrupt_file_warns_visibly(tmp_path) -> None:
+    """A corrupt models.json must not look identical to "nothing discovered yet"."""
+    bad = tmp_path / "bad.json"
+    bad.write_text("not json", encoding="utf-8")
+    with patch("config.json_store.logger.bind") as mock_bind:
+        load_catalog(bad)
+    mock_bind.assert_called_once_with(console=True)
+
+
+def test_load_aliases_corrupt_file_warns_visibly(tmp_path) -> None:
+    """Regression: a corrupted model-aliases.json made every -keyword look
+    unrecognized with zero signal as to why."""
+    bad = tmp_path / "bad.json"
+    bad.write_text("not json", encoding="utf-8")
+    with patch("config.json_store.logger.bind") as mock_bind:
+        assert load_aliases(bad) == {}
+    mock_bind.assert_called_once_with(console=True)
+
+
+def test_persist_refreshed_models_write_failure_warns_visibly(tmp_path) -> None:
+    catalog_path = tmp_path / "models.json"
+    aliases_path = tmp_path / "model-aliases.json"
+    with (
+        patch("config.model_store.write_json", side_effect=OSError("disk full")),
+        patch("config.model_store.logger.bind") as mock_bind,
+    ):
+        result = persist_refreshed_models(
+            {"kimi": ["kimi-k2.7-code"]},
+            catalog_path=catalog_path,
+            aliases_path=aliases_path,
+        )
+    assert result == {}
+    mock_bind.assert_called_once_with(console=True)
 
 
 def test_seed_aliases_adds_suggestions_and_keeps_user_entries() -> None:

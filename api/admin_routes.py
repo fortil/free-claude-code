@@ -185,6 +185,20 @@ async def local_provider_status(request: Request):
 async def test_provider(provider_id: str, request: Request):
     require_loopback_admin(request)
     settings = get_cached_settings()
+    if provider_id in LOCAL_PROVIDER_PATHS:
+        config = load_config_response()
+        values = {field["key"]: field["value"] for field in config["fields"]}
+        if not _local_provider_url(provider_id, values).strip():
+            # An explicitly blanked base URL means "not configured" -- the status
+            # card already shows "Missing URL" for this. Match that here instead
+            # of silently falling back to build_provider_config's hardcoded
+            # default (e.g. http://localhost:11434 for Ollama), which would
+            # reconnect to a provider the user deliberately cleared.
+            return {
+                "provider_id": provider_id,
+                "ok": False,
+                "error_type": "MissingBaseURL",
+            }
     registry = getattr(request.app.state, "provider_registry", None)
     if not isinstance(registry, ProviderRegistry):
         registry = ProviderRegistry()
