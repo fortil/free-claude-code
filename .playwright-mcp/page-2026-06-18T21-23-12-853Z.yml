@@ -1,0 +1,302 @@
+- generic [ref=e2]:
+  - complementary [ref=e3]:
+    - generic [ref=e4]:
+      - generic [ref=e5]: FC
+      - generic [ref=e6]:
+        - heading "Free Claude Code" [level=1] [ref=e7]
+        - paragraph [ref=e8]: Server Control
+    - navigation "Admin views" [ref=e9]:
+      - button "Providers" [ref=e10] [cursor=pointer]
+      - button "Model Config" [ref=e11] [cursor=pointer]
+      - button "Messaging" [ref=e12] [cursor=pointer]
+  - main [ref=e13]:
+    - heading "Providers" [level=2] [ref=e16]
+    - generic [ref=e18]:
+      - region "Provider status" [ref=e19]:
+        - heading "Providers" [level=3] [ref=e21]
+        - generic [ref=e22]:
+          - article [ref=e23]:
+            - generic [ref=e24]:
+              - strong [ref=e25]: NVIDIA NIM
+              - generic [ref=e26]: Missing key
+            - generic [ref=e27]: NVIDIA_NIM_API_KEY
+            - button "Refresh models" [ref=e28] [cursor=pointer]
+          - article [ref=e29]:
+            - generic [ref=e30]:
+              - strong [ref=e31]: OpenRouter
+              - generic [ref=e32]: Missing key
+            - generic [ref=e33]: OPENROUTER_API_KEY
+            - button "Refresh models" [ref=e34] [cursor=pointer]
+          - article [ref=e35]:
+            - generic [ref=e36]:
+              - strong [ref=e37]: Gemini
+              - generic [ref=e38]: Missing key
+            - generic [ref=e39]: GEMINI_API_KEY
+            - button "Refresh models" [ref=e40] [cursor=pointer]
+          - article [ref=e41]:
+            - generic [ref=e42]:
+              - strong [ref=e43]: DeepSeek
+              - generic [ref=e44]: Missing key
+            - generic [ref=e45]: DEEPSEEK_API_KEY
+            - button "Refresh models" [ref=e46] [cursor=pointer]
+          - article [ref=e47]:
+            - generic [ref=e48]:
+              - strong [ref=e49]: Mistral
+              - generic [ref=e50]: Missing key
+            - generic [ref=e51]: MISTRAL_API_KEY
+            - button "Refresh models" [ref=e52] [cursor=pointer]
+          - article [ref=e53]:
+            - generic [ref=e54]:
+              - strong [ref=e55]: Mistral Codestral
+              - generic [ref=e56]: Missing key
+            - generic [ref=e57]: CODESTRAL_API_KEY
+            - button "Refresh models" [ref=e58] [cursor=pointer]
+          - article [ref=e59]:
+            - generic [ref=e60]:
+              - strong [ref=e61]: OpenCode Zen
+              - generic [ref=e62]: Missing key
+            - generic [ref=e63]: OPENCODE_API_KEY
+            - button "Refresh models" [ref=e64] [cursor=pointer]
+          - article [ref=e65]:
+            - generic [ref=e66]:
+              - strong [ref=e67]: OpenCode Go
+              - generic [ref=e68]: Missing key
+            - generic [ref=e69]: OPENCODE_API_KEY
+            - button "Refresh models" [ref=e70] [cursor=pointer]
+          - article [ref=e71]:
+            - generic [ref=e72]:
+              - strong [ref=e73]: Wafer
+              - generic [ref=e74]: Missing key
+            - generic [ref=e75]: WAFER_API_KEY
+            - button "Refresh models" [ref=e76] [cursor=pointer]
+          - article [ref=e77]:
+            - generic [ref=e78]:
+              - strong [ref=e79]: Kimi
+              - generic [ref=e80]: Missing key
+            - generic [ref=e81]: KIMI_API_KEY
+            - button "Refresh models" [ref=e82] [cursor=pointer]
+          - article [ref=e83]:
+            - generic [ref=e84]:
+              - strong [ref=e85]: Cerebras
+              - generic [ref=e86]: Missing key
+            - generic [ref=e87]: CEREBRAS_API_KEY
+            - button "Refresh models" [ref=e88] [cursor=pointer]
+          - article [ref=e89]:
+            - generic [ref=e90]:
+              - strong [ref=e91]: Groq
+              - generic [ref=e92]: Missing key
+            - generic [ref=e93]: GROQ_API_KEY
+            - button "Refresh models" [ref=e94] [cursor=pointer]
+          - article [ref=e95]:
+            - generic [ref=e96]:
+              - strong [ref=e97]: Openai
+              - generic [ref=e98]: Configured
+            - generic [ref=e99]: OPENAI_API_KEY
+            - button "Refresh models" [ref=e100] [cursor=pointer]
+          - article [ref=e101]:
+            - generic [ref=e102]:
+              - strong [ref=e103]: Fireworks
+              - generic [ref=e104]: Missing key
+            - generic [ref=e105]: FIREWORKS_API_KEY
+            - button "Refresh models" [ref=e106] [cursor=pointer]
+          - article [ref=e107]:
+            - generic [ref=e108]:
+              - strong [ref=e109]: Z.ai
+              - generic [ref=e110]: Missing key
+            - generic [ref=e111]: ZAI_API_KEY
+            - button "Refresh models" [ref=e112] [cursor=pointer]
+          - article [ref=e113]:
+            - generic [ref=e114]:
+              - strong [ref=e115]: LM Studio
+              - generic [ref=e116]: Not checked
+            - generic [ref=e117]: http://localhost:1234/v1
+            - button "Test" [ref=e118] [cursor=pointer]
+          - article [ref=e119]:
+            - generic [ref=e120]:
+              - strong [ref=e121]: llama.cpp
+              - generic [ref=e122]: Not checked
+            - generic [ref=e123]: http://localhost:8080/v1
+            - button "Test" [ref=e124] [cursor=pointer]
+          - article [ref=e125]:
+            - generic [ref=e126]:
+              - strong [ref=e127]: Ollama
+              - generic [ref=e128]: Not checked
+            - generic [ref=e129]: http://localhost:11434
+            - button "Test" [ref=e130] [cursor=pointer]
+      - generic "Provider configuration" [ref=e131]:
+        - generic [ref=e132]:
+          - generic [ref=e134]:
+            - heading "Providers" [level=3] [ref=e135]
+            - paragraph [ref=e136]: Provider keys, local endpoints, and proxy settings.
+          - generic [ref=e137]:
+            - generic [ref=e138]:
+              - generic [ref=e139]:
+                - generic [ref=e140]: NVIDIA NIM API Key
+                - generic [ref=e141]: template
+              - textbox "NVIDIA NIM API Key template" [ref=e142]:
+                - /placeholder: Not configured
+              - generic [ref=e143]: Used by NVIDIA NIM chat and optional NIM voice transcription.
+            - generic [ref=e144]:
+              - generic [ref=e145]:
+                - generic [ref=e146]: OpenRouter API Key
+                - generic [ref=e147]: template
+              - textbox "OpenRouter API Key template" [ref=e148]:
+                - /placeholder: Not configured
+            - generic [ref=e149]:
+              - generic [ref=e150]:
+                - generic [ref=e151]: Mistral API Key
+                - generic [ref=e152]: template
+              - textbox "Mistral API Key template" [ref=e153]:
+                - /placeholder: Not configured
+              - generic [ref=e154]: Mistral La Plateforme (api.mistral.ai); Experiment plan is free tier with rate limits.
+            - generic [ref=e155]:
+              - generic [ref=e156]:
+                - generic [ref=e157]: Codestral API Key
+                - generic [ref=e158]: template
+              - textbox "Codestral API Key template" [ref=e159]:
+                - /placeholder: Not configured
+              - generic [ref=e160]: "Mistral Codestral endpoint (codestral.mistral.ai); distinct from Mistral La Plateforme ``MISTRAL_API_KEY``. See Mistral docs for coding/FIM domains."
+            - generic [ref=e161]:
+              - generic [ref=e162]:
+                - generic [ref=e163]: DeepSeek API Key
+                - generic [ref=e164]: template
+              - textbox "DeepSeek API Key template" [ref=e165]:
+                - /placeholder: Not configured
+            - generic [ref=e166]:
+              - generic [ref=e167]:
+                - generic [ref=e168]: Kimi API Key
+                - generic [ref=e169]: template
+              - textbox "Kimi API Key template" [ref=e170]:
+                - /placeholder: Not configured
+            - generic [ref=e171]:
+              - generic [ref=e172]:
+                - generic [ref=e173]: Wafer API Key
+                - generic [ref=e174]: template
+              - textbox "Wafer API Key template" [ref=e175]:
+                - /placeholder: Not configured
+            - generic [ref=e176]:
+              - generic [ref=e177]:
+                - generic [ref=e178]: OpenCode API Key
+                - generic [ref=e179]: template
+              - textbox "OpenCode API Key template" [ref=e180]:
+                - /placeholder: Not configured
+              - generic [ref=e181]: OpenCode Zen curated gateway (opencode.ai/zen/v1) and OpenCode Go subscription gateway (opencode.ai/zen/go/v1); single key from opencode.ai/auth.
+            - generic [ref=e182]:
+              - generic [ref=e183]:
+                - generic [ref=e184]: Z.ai API Key
+                - generic [ref=e185]: template
+              - textbox "Z.ai API Key template" [ref=e186]:
+                - /placeholder: Not configured
+              - generic [ref=e187]: Z.ai Coding Plan API key.
+            - generic [ref=e188]:
+              - generic [ref=e189]:
+                - generic [ref=e190]: Fireworks API Key
+                - generic [ref=e191]: template
+              - textbox "Fireworks API Key template" [ref=e192]:
+                - /placeholder: Not configured
+              - generic [ref=e193]: Fireworks AI inference API key.
+            - generic [ref=e194]:
+              - generic [ref=e195]:
+                - generic [ref=e196]: Gemini API Key
+                - generic [ref=e197]: template
+              - textbox "Gemini API Key template" [ref=e198]:
+                - /placeholder: Not configured
+              - generic [ref=e199]: Google AI Studio Gemini API key (Google AI Studio / Gemini API [OpenAI-compatible](https://ai.google.dev/gemini-api/docs/openai)); free tier has per-model rate limits and data may be used for improvement outside the UK/CH/EEA/EU.
+            - generic [ref=e200]:
+              - generic [ref=e201]:
+                - generic [ref=e202]: Groq API Key
+                - generic [ref=e203]: template
+              - textbox "Groq API Key template" [ref=e204]:
+                - /placeholder: Not configured
+              - generic [ref=e205]: GroqCloud OpenAI-compatible API key ([console.groq.com/keys](https://console.groq.com/keys)); see Groq [OpenAI compatibility docs](https://console.groq.com/docs/openai).
+            - generic [ref=e206]:
+              - generic [ref=e207]:
+                - generic [ref=e208]: Cerebras API Key
+                - generic [ref=e209]: template
+              - textbox "Cerebras API Key template" [ref=e210]:
+                - /placeholder: Not configured
+              - generic [ref=e211]: Cerebras Inference API key (create in [Cloud Console](https://cloud.cerebras.ai)); see [Quickstart](https://inference-docs.cerebras.ai/quickstart) and [OpenAI compatibility](https://inference-docs.cerebras.ai/resources/openai).
+            - generic [ref=e212]:
+              - generic [ref=e213]:
+                - generic [ref=e214]: OpenAI API Key
+                - generic [ref=e215]: process env locked
+              - textbox "OpenAI API Key process env locked" [disabled] [ref=e216]:
+                - /placeholder: Configured - enter a new value to replace
+              - generic [ref=e217]: OpenAI API key (create in [API keys](https://platform.openai.com/api-keys)); see [Chat Completions docs](https://platform.openai.com/docs/api-reference/chat).
+            - generic [ref=e218]:
+              - generic [ref=e219]:
+                - generic [ref=e220]: LM Studio Base URL
+                - generic [ref=e221]: template
+              - textbox "LM Studio Base URL template" [ref=e222]: http://localhost:1234/v1
+            - generic [ref=e223]:
+              - generic [ref=e224]:
+                - generic [ref=e225]: llama.cpp Base URL
+                - generic [ref=e226]: template
+              - textbox "llama.cpp Base URL template" [ref=e227]: http://localhost:8080/v1
+            - generic [ref=e228]:
+              - generic [ref=e229]:
+                - generic [ref=e230]: Ollama Base URL
+                - generic [ref=e231]: template
+              - textbox "Ollama Base URL template" [ref=e232]: http://localhost:11434
+          - button "Show advanced" [ref=e233] [cursor=pointer]
+        - generic [ref=e234]:
+          - generic [ref=e236]:
+            - heading "Runtime" [level=3] [ref=e237]
+            - paragraph [ref=e238]: Server API token, rate limits, timeouts, and process settings.
+          - generic [ref=e239]:
+            - generic [ref=e240]:
+              - generic [ref=e241]:
+                - generic [ref=e242]: API/CLI Auth Token
+                - generic [ref=e243]: template
+              - textbox "API/CLI Auth Token template" [ref=e244]:
+                - /placeholder: Configured - enter a new value to replace
+              - generic [ref=e245]: Protects Claude/API access. It is not admin-page login.
+            - generic [ref=e246]:
+              - generic [ref=e247]:
+                - generic [ref=e248]: Provider Rate Limit
+                - generic [ref=e249]: template
+              - spinbutton "Provider Rate Limit template" [ref=e250]: "1"
+            - generic [ref=e251]:
+              - generic [ref=e252]:
+                - generic [ref=e253]: Provider Rate Window
+                - generic [ref=e254]: template
+              - spinbutton "Provider Rate Window template" [ref=e255]: "3"
+            - generic [ref=e256]:
+              - generic [ref=e257]:
+                - generic [ref=e258]: Provider Max Concurrency
+                - generic [ref=e259]: template
+              - spinbutton "Provider Max Concurrency template" [ref=e260]: "5"
+            - generic [ref=e261]:
+              - generic [ref=e262]:
+                - generic [ref=e263]: HTTP Read Timeout
+                - generic [ref=e264]: template
+              - spinbutton "HTTP Read Timeout template" [ref=e265]: "300"
+            - generic [ref=e266]:
+              - generic [ref=e267]:
+                - generic [ref=e268]: HTTP Write Timeout
+                - generic [ref=e269]: template
+              - spinbutton "HTTP Write Timeout template" [ref=e270]: "60"
+            - generic [ref=e271]:
+              - generic [ref=e272]:
+                - generic [ref=e273]: HTTP Connect Timeout
+                - generic [ref=e274]: template
+              - spinbutton "HTTP Connect Timeout template" [ref=e275]: "60"
+            - generic [ref=e276]:
+              - generic [ref=e277]:
+                - generic [ref=e278]: Server Host
+                - generic [ref=e279]: template
+              - textbox "Server Host template" [ref=e280]: 0.0.0.0
+            - generic [ref=e281]:
+              - generic [ref=e282]:
+                - generic [ref=e283]: Server Port
+                - generic [ref=e284]: process env locked
+              - spinbutton "Server Port process env locked" [disabled] [ref=e285]: "8082"
+          - button "Show advanced" [ref=e286] [cursor=pointer]
+  - contentinfo [ref=e287]:
+    - generic [ref=e288]:
+      - strong [ref=e289]: No changes
+      - generic [ref=e290]: /Users/william/.fcc/.env
+    - generic [ref=e291]: Loading admin config
+    - generic [ref=e292]:
+      - button "Validate" [ref=e293] [cursor=pointer]
+      - button "Apply" [disabled] [ref=e294]
