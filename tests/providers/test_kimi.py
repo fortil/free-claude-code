@@ -7,6 +7,8 @@ import pytest
 
 from api.models.anthropic import Message, MessagesRequest
 from config.constants import ANTHROPIC_DEFAULT_MAX_OUTPUT_TOKENS
+from core.anthropic.native_messages_request import ANTHROPIC_MIN_THINKING_BUDGET_TOKENS
+from core.openai_responses import OpenAIResponsesAdapter
 from providers.base import ProviderConfig
 from providers.defaults import KIMI_DEFAULT_BASE
 from providers.exceptions import InvalidRequestError
@@ -81,6 +83,77 @@ def test_build_request_body_default_max_tokens(kimi_provider):
     )
     body = kimi_provider._build_request_body(request)
     assert body["max_tokens"] == ANTHROPIC_DEFAULT_MAX_OUTPUT_TOKENS
+
+
+def _kimi_request(*, max_tokens, thinking):
+    return MessagesRequest.model_validate(
+        {
+            "model": "kimi-k2.7-code",
+            "max_tokens": max_tokens,
+            "thinking": thinking,
+            "messages": [{"role": "user", "content": "hi"}],
+        }
+    )
+
+
+def test_build_request_body_preserves_valid_thinking_budget(kimi_provider):
+    body = kimi_provider._build_request_body(
+        _kimi_request(
+            max_tokens=8000, thinking={"type": "enabled", "budget_tokens": 2000}
+        )
+    )
+    assert body["thinking"] == {"type": "enabled", "budget_tokens": 2000}
+
+
+def test_build_request_body_injects_min_budget_when_absent(kimi_provider):
+    # Moonshot kimi-k2.7-code requires a budget on an enabled block.
+    body = kimi_provider._build_request_body(
+        _kimi_request(max_tokens=8000, thinking={"type": "enabled"})
+    )
+    assert body["thinking"] == {
+        "type": "enabled",
+        "budget_tokens": ANTHROPIC_MIN_THINKING_BUDGET_TOKENS,
+    }
+
+
+def test_build_request_body_clamps_budget_below_max_tokens(kimi_provider):
+    # budget must stay strictly below max_tokens (Anthropic contract).
+    body = kimi_provider._build_request_body(
+        _kimi_request(
+            max_tokens=1500, thinking={"type": "enabled", "budget_tokens": 5000}
+        )
+    )
+    assert body["thinking"] == {"type": "enabled", "budget_tokens": 1499}
+
+
+def test_build_request_body_drops_thinking_when_max_tokens_too_small(kimi_provider):
+    # No valid budget exists when max_tokens <= the minimum; drop thinking
+    # instead of emitting an Anthropic-invalid (and Moonshot-rejected) body.
+    body = kimi_provider._build_request_body(
+        _kimi_request(
+            max_tokens=50, thinking={"type": "enabled", "budget_tokens": 1024}
+        )
+    )
+    assert "thinking" not in body
+    assert body["max_tokens"] == 50
+
+
+def test_responses_reasoning_reaches_kimi_thinking_budget(kimi_provider):
+    # Codex `/v1/responses` reasoning must reach Moonshot's wire body as an
+    # enabled thinking block with a valid budget; otherwise kimi-k2.7-code 400s.
+    payload = OpenAIResponsesAdapter().to_anthropic_payload(
+        {
+            "model": "kimi/kimi-k2.7-code",
+            "input": "Hello",
+            "reasoning": {"effort": "low"},
+        }
+    )
+    request = MessagesRequest(**payload)
+    body = kimi_provider._build_request_body(request)
+    assert body["thinking"] == {
+        "type": "enabled",
+        "budget_tokens": ANTHROPIC_MIN_THINKING_BUDGET_TOKENS,
+    }
 
 
 def test_build_request_body_rejects_extra_body(kimi_provider):

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import os
 from dataclasses import dataclass, field
@@ -12,6 +13,8 @@ from fastapi import FastAPI
 from loguru import logger
 
 from api.admin_urls import local_admin_url
+from api.usage_tracker import UsageTracker
+from config.active_model import ActiveModelStore
 from config.settings import Settings, get_settings
 from providers.exceptions import ServiceUnavailableError
 from providers.registry import ProviderRegistry
@@ -88,6 +91,7 @@ class AppRuntime:
     app: FastAPI
     settings: Settings
     _provider_registry: ProviderRegistry | None = field(default=None, init=False)
+    _usage_tracker: UsageTracker | None = field(default=None, init=False)
     messaging_platform: MessagingPlatform | None = None
     messaging_workflow: MessagingWorkflow | None = None
     cli_manager: ManagedClaudeSessionManager | None = None
@@ -105,6 +109,9 @@ class AppRuntime:
         admin_url = local_admin_url(self.settings)
         self._provider_registry = ProviderRegistry()
         self.app.state.provider_registry = self._provider_registry
+        self._usage_tracker = UsageTracker()
+        self.app.state.usage_tracker = self._usage_tracker
+        self.app.state.active_model = ActiveModelStore()
         try:
             warn_if_process_auth_token(self.settings)
             await self._validate_configured_models_best_effort()
@@ -153,6 +160,9 @@ class AppRuntime:
                     )
 
         logger.info("Shutdown requested, cleaning up...")
+        if self._usage_tracker is not None:
+            with contextlib.suppress(Exception):
+                self._usage_tracker.flush()
         if self.messaging_platform:
             await best_effort(
                 "messaging_platform.stop",

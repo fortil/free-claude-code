@@ -40,6 +40,7 @@ def _settings(**overrides):
         "gemini_api_key": "",
         "groq_api_key": "",
         "cerebras_api_key": "",
+        "openai_api_key": "",
         "fireworks_api_key": "",
         "lm_studio_base_url": "",
         "llamacpp_base_url": "",
@@ -310,13 +311,14 @@ def test_nvidia_nim_cli_models_reject_empty_override() -> None:
         raise AssertionError("expected empty NVIDIA NIM CLI model override to fail")
 
 
-def test_nvidia_nim_cli_models_reject_wrong_provider_prefix() -> None:
-    try:
-        nvidia_nim_cli_model_refs({"FCC_SMOKE_NIM_MODELS": "open_router/model"})
-    except ValueError as exc:
-        assert "nvidia_nim" in str(exc)
-    else:
-        raise AssertionError("expected wrong provider prefix to fail")
+def test_nvidia_nim_cli_models_accept_raw_owner_prefixed_ids() -> None:
+    """CLI matrices treat values as raw upstream IDs and prefix with the CLI provider."""
+    refs = nvidia_nim_cli_model_refs(
+        {"FCC_SMOKE_NIM_MODELS": "openai/gpt-oss-120b,open_router/model"}
+    )
+
+    assert "nvidia_nim/openai/gpt-oss-120b" in refs
+    assert "nvidia_nim/open_router/model" in refs
 
 
 def test_smoke_config_returns_nvidia_nim_cli_provider_models(monkeypatch) -> None:
@@ -382,15 +384,13 @@ def test_openrouter_free_cli_models_reject_empty_override() -> None:
         raise AssertionError("expected empty OpenRouter free CLI override to fail")
 
 
-def test_openrouter_free_cli_models_reject_wrong_provider_prefix() -> None:
-    try:
-        openrouter_free_cli_model_refs(
-            {"FCC_SMOKE_OPENROUTER_FREE_MODELS": "nvidia_nim/model"}
-        )
-    except ValueError as exc:
-        assert "open_router" in str(exc)
-    else:
-        raise AssertionError("expected wrong provider prefix to fail")
+def test_openrouter_free_cli_models_accept_raw_owner_prefixed_ids() -> None:
+    """CLI matrices treat values as raw upstream IDs and prefix with the CLI provider."""
+    refs = openrouter_free_cli_model_refs(
+        {"FCC_SMOKE_OPENROUTER_FREE_MODELS": "nvidia_nim/model:free"}
+    )
+
+    assert "open_router/nvidia_nim/model:free" in refs
 
 
 def test_smoke_config_returns_openrouter_free_cli_provider_models(monkeypatch) -> None:

@@ -13,6 +13,8 @@ from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
+from config.model_store import persist_refreshed_models
+from config.pricing import build_usage_report, seed_pricing_template
 from config.settings import Settings
 from config.settings import get_settings as get_cached_settings
 from providers.registry import ProviderRegistry
@@ -42,11 +44,21 @@ class AdminConfigPayload(BaseModel):
     values: dict[str, Any] = Field(default_factory=dict)
 
 
+_UNSPECIFIED_HOSTS = frozenset({"0.0.0.0", "::"})
+
+
 def _is_loopback_host(host: str | None) -> bool:
     if host is None:
         return False
     normalized = host.strip().strip("[]").lower()
     if normalized == "localhost":
+        return True
+    if normalized in _UNSPECIFIED_HOSTS:
+        # HOST=0.0.0.0/:: binds all interfaces but is browsed from the same
+        # machine as loopback (see admin_urls._browser_host_for_local_urls).
+        # A same-machine POST to that URL sends Origin: http://0.0.0.0:<port>,
+        # which would otherwise fail this check even though the request never
+        # left the host.
         return True
     try:
         return ipaddress.ip_address(normalized).is_loopback
@@ -149,7 +161,7 @@ async def admin_status(request: Request):
         "status": "running",
         "host": settings.host,
         "port": settings.port,
-        "model": settings.model,
+        "model": settings.model or "",
         "provider": settings.provider_type,
         "pending_fields": getattr(request.app.state, "admin_pending_fields", []),
         "provider_status": provider_config_status(),
@@ -173,6 +185,20 @@ async def local_provider_status(request: Request):
 async def test_provider(provider_id: str, request: Request):
     require_loopback_admin(request)
     settings = get_cached_settings()
+    if provider_id in LOCAL_PROVIDER_PATHS:
+        config = load_config_response()
+        values = {field["key"]: field["value"] for field in config["fields"]}
+        if not _local_provider_url(provider_id, values).strip():
+            # An explicitly blanked base URL means "not configured" -- the status
+            # card already shows "Missing URL" for this. Match that here instead
+            # of silently falling back to build_provider_config's hardcoded
+            # default (e.g. http://localhost:11434 for Ollama), which would
+            # reconnect to a provider the user deliberately cleared.
+            return {
+                "provider_id": provider_id,
+                "ok": False,
+                "error_type": "MissingBaseURL",
+            }
     registry = getattr(request.app.state, "provider_registry", None)
     if not isinstance(registry, ProviderRegistry):
         registry = ProviderRegistry()
@@ -187,10 +213,14 @@ async def test_provider(provider_id: str, request: Request):
             "error_type": type(exc).__name__,
         }
     registry.cache_model_infos(provider_id, infos)
+    model_ids = sorted(info.model_id for info in infos)
+    if settings.update_models_on_refresh:
+        persist_refreshed_models({provider_id: model_ids})
+        seed_pricing_template({provider_id: model_ids})
     return {
         "provider_id": provider_id,
         "ok": True,
-        "models": sorted(info.model_id for info in infos),
+        "models": model_ids,
     }
 
 
@@ -203,12 +233,28 @@ async def refresh_models(request: Request):
         registry = ProviderRegistry()
         request.app.state.provider_registry = registry
     await registry.refresh_model_list_cache(settings)
-    return {
-        "cached_models": {
-            provider_id: sorted(model_ids)
-            for provider_id, model_ids in registry.cached_model_ids().items()
-        }
+    cached = {
+        provider_id: sorted(model_ids)
+        for provider_id, model_ids in registry.cached_model_ids().items()
     }
+    if settings.update_models_on_refresh:
+        persist_refreshed_models(cached)
+        seed_pricing_template(cached)
+    return {"cached_models": cached}
+
+
+@router.get("/admin/api/usage")
+async def usage_report(request: Request):
+    """Return accumulated token usage joined with current prices, per provider."""
+    require_loopback_admin(request)
+    tracker = getattr(request.app.state, "usage_tracker", None)
+    snapshot = tracker.snapshot() if tracker is not None else {"providers": {}}
+    report = build_usage_report(snapshot)
+    # Surface the persistent -keyword override so it is obvious which model every
+    # request is actually routed to (it overrides the configured MODEL default).
+    active = getattr(request.app.state, "active_model", None)
+    report["active_model"] = active.load() if active is not None else None
+    return report
 
 
 def _filtered_values(values: dict[str, Any]) -> dict[str, Any]:

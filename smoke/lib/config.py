@@ -57,6 +57,7 @@ PROVIDER_SMOKE_DEFAULT_MODELS: dict[str, str] = {
     "gemini": "gemini/models/gemini-3.1-flash-lite",
     "groq": "groq/llama-3.3-70b-versatile",
     "cerebras": "cerebras/llama3.1-8b",
+    "openai": "openai/gpt-4o",
 }
 
 NVIDIA_NIM_CLI_DEFAULT_MODELS: tuple[str, ...] = (
@@ -257,6 +258,8 @@ class SmokeConfig:
             return bool(self.settings.groq_api_key.strip())
         if provider == "cerebras":
             return bool(self.settings.cerebras_api_key.strip())
+        if provider == "openai":
+            return bool(self.settings.openai_api_key.strip())
         return False
 
 
@@ -293,7 +296,9 @@ def _provider_smoke_model(provider: str) -> tuple[str, str]:
     return default, "provider_default"
 
 
-def _normalize_provider_model(provider: str, raw_model: str) -> str:
+def _normalize_provider_model(
+    provider: str, raw_model: str, *, strict: bool = True
+) -> str:
     model = raw_model.strip()
     if not model:
         msg = f"FCC_SMOKE_MODEL_{provider.upper()} must not be empty"
@@ -303,7 +308,7 @@ def _normalize_provider_model(provider: str, raw_model: str) -> str:
     prefix = Settings.parse_provider_type(model)
     if prefix == provider:
         return model
-    if prefix in SUPPORTED_PROVIDER_IDS:
+    if strict and prefix in SUPPORTED_PROVIDER_IDS:
         msg = (
             f"FCC_SMOKE_MODEL_{provider.upper()} must use provider prefix "
             f"{provider!r}, got {model!r}"
@@ -337,7 +342,7 @@ def nvidia_nim_cli_model_refs(
 
     normalized: dict[str, str] = {}
     for raw_model, model_source in models:
-        full_model = _normalize_provider_model("nvidia_nim", raw_model)
+        full_model = _normalize_provider_model("nvidia_nim", raw_model, strict=False)
         normalized.setdefault(full_model, model_source)
     return normalized
 
@@ -371,7 +376,7 @@ def openrouter_free_cli_model_refs(
 
     normalized: dict[str, str] = {}
     for raw_model, model_source in models:
-        full_model = _normalize_provider_model("open_router", raw_model)
+        full_model = _normalize_provider_model("open_router", raw_model, strict=False)
         normalized.setdefault(full_model, model_source)
     return normalized
 

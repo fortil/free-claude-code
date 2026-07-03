@@ -252,6 +252,18 @@ FIELDS: tuple[ConfigFieldSpec, ...] = (
         ),
     ),
     ConfigFieldSpec(
+        "OPENAI_API_KEY",
+        "OpenAI API Key",
+        "providers",
+        "secret",
+        settings_attr="openai_api_key",
+        secret=True,
+        description=(
+            "OpenAI API key (create in [API keys](https://platform.openai.com/api-keys)); "
+            "see [Chat Completions docs](https://platform.openai.com/docs/api-reference/chat)."
+        ),
+    ),
+    ConfigFieldSpec(
         "LM_STUDIO_BASE_URL",
         "LM Studio Base URL",
         "providers",
@@ -408,12 +420,26 @@ FIELDS: tuple[ConfigFieldSpec, ...] = (
         advanced=True,
     ),
     ConfigFieldSpec(
+        "OPENAI_PROXY",
+        "OpenAI Proxy",
+        "providers",
+        "secret",
+        settings_attr="openai_proxy",
+        secret=True,
+        advanced=True,
+    ),
+    ConfigFieldSpec(
         "MODEL",
         "Default Model",
         "models",
         settings_attr="model",
         default="nvidia_nim/nvidia/nemotron-3-super-120b-a12b",
-        description="Fallback provider/model route for all Claude model names.",
+        description=(
+            "Fallback provider/model route for all Claude model names. Leave "
+            "empty for passthrough: FCC forwards the client's provider/model, "
+            "gateway model, -keyword, or active model; a bare unmapped name "
+            "(not matching MODEL_OPUS/SONNET/HAIKU) returns a 400."
+        ),
     ),
     ConfigFieldSpec(
         "MODEL_OPUS",
@@ -435,6 +461,19 @@ FIELDS: tuple[ConfigFieldSpec, ...] = (
         "models",
         settings_attr="model_haiku",
         description="Optional provider/model route for Haiku requests.",
+    ),
+    ConfigFieldSpec(
+        "UPDATE_MODELS_ON_REFRESH",
+        "Persist On Refresh",
+        "models",
+        "boolean",
+        settings_attr="update_models_on_refresh",
+        default="true",
+        description=(
+            "When on, Refresh models writes ~/.fcc/models.json and seeds "
+            "model-aliases.json / model-pricing.json. Turn off to keep those "
+            "files hand-curated."
+        ),
     ),
     ConfigFieldSpec(
         "ENABLE_MODEL_THINKING",
@@ -894,6 +933,12 @@ FIELDS: tuple[ConfigFieldSpec, ...] = (
     ConfigFieldSpec(
         "FCC_SMOKE_MODEL_CEREBRAS",
         "Smoke Cerebras Model",
+        "smoke",
+        advanced=True,
+    ),
+    ConfigFieldSpec(
+        "FCC_SMOKE_MODEL_OPENAI",
+        "Smoke OpenAI Model",
         "smoke",
         advanced=True,
     ),

@@ -16,7 +16,14 @@ from config.settings import Settings
 from core.anthropic import get_token_count, get_user_facing_error_message
 from core.anthropic.sse import ANTHROPIC_SSE_RESPONSE_HEADERS
 from core.openai_responses import OpenAIResponsesAdapter
-from core.trace import api_messages_request_snapshot, trace_event, traced_async_stream
+from core.trace import (
+    UsageRecorder,
+    api_messages_request_snapshot,
+    log_context_stream,
+    record_usage_stream,
+    trace_event,
+    traced_async_stream,
+)
 from providers.base import BaseProvider
 from providers.exceptions import InvalidRequestError, ProviderError
 
@@ -25,6 +32,7 @@ from .models.anthropic import MessagesRequest, TokenCountRequest
 from .models.openai_responses import OpenAIResponsesRequest
 from .models.responses import TokenCountResponse
 from .optimization_handlers import try_optimizations
+from .prompt_model_keyword import ActiveModel, apply_prompt_model_keyword
 from .web_tools.egress import WebFetchEgressPolicy
 from .web_tools.request import (
     is_web_server_tool_request,
@@ -110,12 +118,16 @@ class ApiRequestPipeline:
         model_router: ModelRouter | None = None,
         token_counter: TokenCounter = get_token_count,
         responses_adapter: OpenAIResponsesAdapter | None = None,
+        usage_recorder: UsageRecorder | None = None,
+        active_store: ActiveModel | None = None,
     ) -> None:
         self._settings = settings
         self._provider_getter = provider_getter
         self._model_router = model_router or ModelRouter(settings)
         self._token_counter = token_counter
         self._responses_adapter = responses_adapter or OpenAIResponsesAdapter()
+        self._usage_recorder = usage_recorder
+        self._active_store = active_store
         self._message_intercepts: tuple[MessageIntercept, ...] = (
             self._intercept_web_server_tool,
             self._intercept_local_optimization,
@@ -125,6 +137,9 @@ class ApiRequestPipeline:
         """Create an Anthropic-compatible message response."""
         try:
             _require_non_empty_messages(request_data.messages)
+            request_data = apply_prompt_model_keyword(
+                request_data, active_store=self._active_store
+            )
             routed = self._model_router.resolve_messages_request(request_data)
             self._reject_unsupported_server_tools(routed)
 
@@ -173,6 +188,9 @@ class ApiRequestPipeline:
             )
             response_request = MessagesRequest(**anthropic_payload)
             _require_non_empty_messages(response_request.messages)
+            response_request = apply_prompt_model_keyword(
+                response_request, active_store=self._active_store
+            )
             routed = self._model_router.resolve_messages_request(response_request)
             self._reject_unsupported_server_tools(routed)
 
@@ -351,6 +369,15 @@ class ApiRequestPipeline:
             route_trace["wire_api"] = "responses"
         trace_event(**route_trace)
 
+        # One concise, human-readable line per request, echoed to the terminal
+        # (console=True) so operators can see the active model live.
+        logger.bind(console=True, model=routed.resolved.provider_model).info(
+            "model: {} (provider={}, requested={})",
+            routed.resolved.provider_model,
+            routed.resolved.provider_id,
+            routed.resolved.original_model,
+        )
+
         request_id = f"req_{uuid.uuid4().hex[:12]}"
         trace_event(
             stage="ingress",
@@ -373,7 +400,7 @@ class ApiRequestPipeline:
             routed.request.system,
             routed.request.tools,
         )
-        return traced_async_stream(
+        traced = traced_async_stream(
             provider.stream_response(
                 routed.request,
                 input_tokens=input_tokens,
@@ -398,4 +425,16 @@ class ApiRequestPipeline:
                 "provider_id": routed.resolved.provider_id,
                 "gateway_model": routed.request.model,
             },
+        )
+        # Tag every log line emitted while the provider streams with the active
+        # downstream model, regardless of transport family (openai_chat / native).
+        tagged = log_context_stream(traced, model=routed.resolved.provider_model)
+        if self._usage_recorder is None:
+            return tagged
+        # Record token usage from the final SSE once the stream completes.
+        return record_usage_stream(
+            tagged,
+            on_usage=self._usage_recorder,
+            provider_id=routed.resolved.provider_id,
+            model_id=routed.resolved.provider_model,
         )

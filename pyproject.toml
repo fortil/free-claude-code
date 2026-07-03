@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "free-claude-code"
-version = "2.3.11"
+version = "2.13.2"
 description = "Middleware between Claude Code CLI (Anthropic API) and NVIDIA NIM"
 readme = "README.md"
 requires-python = ">=3.14.0"
@@ -23,6 +23,7 @@ dependencies = [
     "loguru>=0.7.0",
     "aiohttp>=3.14.1",
     "jsonschema>=4.25.0",
+    "tokencost>=0.1.26",
 ]
 
 [project.scripts]

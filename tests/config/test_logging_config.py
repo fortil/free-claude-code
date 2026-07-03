@@ -101,3 +101,37 @@ def test_httpx_resets_to_notset_when_verbose_third_party(tmp_path) -> None:
     log_file = str(tmp_path / "verbose.log")
     configure_logging(log_file, force=True, verbose_third_party=True)
     assert logging.getLogger("httpx").level == logging.NOTSET
+
+
+def test_console_filter_passes_only_marked_records() -> None:
+    from config.logging_config import _console_filter
+
+    assert _console_filter({"extra": {"console": True}}) is True
+    assert _console_filter({"extra": {"console": False}}) is False
+    assert _console_filter({"extra": {}}) is False
+
+
+def test_console_sink_emits_only_marked_lines(tmp_path, capsys) -> None:
+    """console=True lines reach stderr; plain lines stay in the file only."""
+    log_file = str(tmp_path / "console.log")
+    configure_logging(log_file, force=True)
+
+    logger.info("internal only, file sink")
+    logger.bind(console=True, model="nvidia_nim/nemotron").info(
+        "model: nvidia_nim/nemotron (provider=nvidia_nim, requested=claude-x)"
+    )
+    logger.complete()
+
+    err = capsys.readouterr().err
+    assert "model: nvidia_nim/nemotron" in err
+    assert "internal only, file sink" not in err
+
+    rows = [
+        json.loads(line)
+        for line in Path(log_file).read_text(encoding="utf-8").strip().split("\n")
+        if line
+    ]
+    # The file keeps everything, and the console line carries the model field.
+    assert any(r.get("message") == "internal only, file sink" for r in rows)
+    model_rows = [r for r in rows if r.get("model") == "nvidia_nim/nemotron"]
+    assert model_rows and model_rows[0]["message"].startswith("model: ")

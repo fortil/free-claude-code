@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from unittest.mock import patch
 
 import httpx
+import pytest
 from fastapi.testclient import TestClient
 
 from api.admin_config import MASKED_SECRET
@@ -46,6 +48,36 @@ def test_admin_page_is_loopback_only(monkeypatch, tmp_path):
     assert _local_client(app).get("/admin").status_code == 200
     remote_client = TestClient(app, client=("203.0.113.10", 50000))
     assert remote_client.get("/admin").status_code == 403
+
+
+def test_admin_config_apply_accepts_unspecified_host_origin(monkeypatch, tmp_path):
+    """HOST=0.0.0.0 users browse /admin at http://0.0.0.0:<port>/admin from the same
+    machine; the resulting Origin header must not be rejected as non-local."""
+    _set_home(monkeypatch, tmp_path)
+    _clear_process_config(monkeypatch)
+    app = create_app(lifespan_enabled=False)
+
+    response = _local_client(app).post(
+        "/admin/api/config/validate",
+        json={"values": {}},
+        headers={"origin": "http://0.0.0.0:8082"},
+    )
+
+    assert response.status_code == 200
+
+
+def test_admin_config_apply_rejects_remote_origin(monkeypatch, tmp_path):
+    _set_home(monkeypatch, tmp_path)
+    _clear_process_config(monkeypatch)
+    app = create_app(lifespan_enabled=False)
+
+    response = _local_client(app).post(
+        "/admin/api/config/validate",
+        json={"values": {}},
+        headers={"origin": "http://evil.example.com"},
+    )
+
+    assert response.status_code == 403
 
 
 def test_admin_page_no_longer_renders_generated_env_panel(monkeypatch, tmp_path):
@@ -149,6 +181,180 @@ def test_admin_validate_rejects_bad_model_shape(monkeypatch, tmp_path):
     body = response.json()
     assert body["valid"] is False
     assert any("provider type" in error for error in body["errors"])
+
+
+def test_admin_validate_accepts_empty_model_for_passthrough(monkeypatch, tmp_path):
+    _set_home(monkeypatch, tmp_path)
+    _clear_process_config(monkeypatch)
+    app = create_app(lifespan_enabled=False)
+
+    response = _local_client(app).post(
+        "/admin/api/config/validate",
+        json={"values": {"MODEL": ""}},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["valid"] is True
+    assert not body["errors"]
+
+
+def test_provider_test_endpoint_persists_catalog_and_aliases(monkeypatch, tmp_path):
+    _set_home(monkeypatch, tmp_path)
+    _clear_process_config(monkeypatch)
+    app = create_app(lifespan_enabled=False)
+
+    from providers.model_listing import model_infos_from_ids
+    from providers.registry import ProviderRegistry
+
+    class _FakeProvider:
+        async def list_model_infos(self):
+            return model_infos_from_ids({"kimi-k2.7-code", "kimi-k2.6"})
+
+    monkeypatch.setattr(
+        ProviderRegistry, "get", lambda self, provider_id, settings: _FakeProvider()
+    )
+
+    response = _local_client(app).post("/admin/api/providers/kimi/test")
+    assert response.status_code == 200
+    assert response.json()["ok"] is True
+
+    from config.model_store import load_aliases, load_catalog
+
+    catalog = load_catalog()
+    assert sorted(catalog["kimi"]) == ["kimi-k2.6", "kimi-k2.7-code"]
+    aliases = load_aliases()
+    assert "kimi/kimi-k2.7-code" in aliases.values()
+    assert (tmp_path / ".fcc" / "models.json").is_file()
+    assert (tmp_path / ".fcc" / "model-aliases.json").is_file()
+
+
+def test_provider_test_endpoint_respects_blanked_local_base_url(monkeypatch, tmp_path):
+    """Regression: an explicitly-cleared local base URL must not silently fall
+    back to the hardcoded default (e.g. http://localhost:11434 for Ollama).
+
+    The status card already shows "Missing URL" when OLLAMA_BASE_URL is blank;
+    clicking "Test" on that same card used to silently reconnect to the default
+    instead, reconnecting to a provider the user deliberately disabled.
+    """
+    _set_home(monkeypatch, tmp_path)
+    _clear_process_config(monkeypatch)
+    monkeypatch.setenv("OLLAMA_BASE_URL", "")
+    app = create_app(lifespan_enabled=False)
+
+    from providers.registry import ProviderRegistry
+
+    called = False
+
+    def _unexpected_get(self, provider_id, settings):
+        nonlocal called
+        called = True
+        raise AssertionError("must not build a provider for a blanked base URL")
+
+    monkeypatch.setattr(ProviderRegistry, "get", _unexpected_get)
+
+    response = _local_client(app).post("/admin/api/providers/ollama/test")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["ok"] is False
+    assert body["error_type"] == "MissingBaseURL"
+    assert called is False
+
+
+def test_refresh_skips_persistence_when_flag_off(monkeypatch, tmp_path):
+    _set_home(monkeypatch, tmp_path)
+    _clear_process_config(monkeypatch)
+    monkeypatch.setenv("UPDATE_MODELS_ON_REFRESH", "false")
+    from config.settings import get_settings
+
+    get_settings.cache_clear()
+    try:
+        app = create_app(lifespan_enabled=False)
+
+        from providers.model_listing import model_infos_from_ids
+        from providers.registry import ProviderRegistry
+
+        class _FakeProvider:
+            async def list_model_infos(self):
+                return model_infos_from_ids({"kimi-k2.7-code"})
+
+        monkeypatch.setattr(
+            ProviderRegistry, "get", lambda self, provider_id, settings: _FakeProvider()
+        )
+
+        response = _local_client(app).post("/admin/api/providers/kimi/test")
+        assert response.status_code == 200
+        assert response.json()["ok"] is True
+        # With the flag off, no on-disk files are written/seeded.
+        assert not (tmp_path / ".fcc" / "models.json").exists()
+        assert not (tmp_path / ".fcc" / "model-aliases.json").exists()
+        assert not (tmp_path / ".fcc" / "model-pricing.json").exists()
+    finally:
+        get_settings.cache_clear()
+
+
+def test_usage_endpoint_reports_tokens_and_cost(monkeypatch, tmp_path):
+    _set_home(monkeypatch, tmp_path)
+    _clear_process_config(monkeypatch)
+    app = create_app(lifespan_enabled=False)
+
+    from api.usage_tracker import UsageTracker
+
+    tracker = UsageTracker(path=tmp_path / ".fcc" / "usage.json")
+    tracker.record("kimi", "kimi-k2.7-code", 1000, 500)
+    app.state.usage_tracker = tracker
+
+    pricing = tmp_path / ".fcc" / "model-pricing.json"
+    pricing.parent.mkdir(parents=True, exist_ok=True)
+    pricing.write_text(
+        json.dumps(
+            {
+                "prices": {
+                    "kimi/kimi-k2.7-code": {
+                        "input_per_million": 1.0,
+                        "output_per_million": 2.0,
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    response = _local_client(app).get("/admin/api/usage")
+    assert response.status_code == 200
+    body = response.json()
+    provider = next(p for p in body["providers"] if p["provider_id"] == "kimi")
+    assert provider["input_tokens"] == 1000
+    assert provider["output_tokens"] == 500
+    # 1000/1e6*1 + 500/1e6*2 = 0.002
+    assert provider["cost_usd"] == pytest.approx(0.002)
+    assert provider["models"][0]["model_id"] == "kimi-k2.7-code"
+    assert body["totals"]["cost_usd"] == pytest.approx(0.002)
+
+
+def test_usage_endpoint_surfaces_active_model(monkeypatch, tmp_path):
+    _set_home(monkeypatch, tmp_path)
+    _clear_process_config(monkeypatch)
+    app = create_app(lifespan_enabled=False)
+
+    from config.active_model import ActiveModelStore
+
+    store = ActiveModelStore(path=tmp_path / ".fcc" / "active-model.json")
+    store.save("kimi/kimi-k2.6")
+    app.state.active_model = store
+
+    response = _local_client(app).get("/admin/api/usage")
+    assert response.status_code == 200
+    assert response.json()["active_model"] == "kimi/kimi-k2.6"
+
+
+def test_usage_endpoint_is_loopback_only(monkeypatch, tmp_path):
+    _set_home(monkeypatch, tmp_path)
+    _clear_process_config(monkeypatch)
+    app = create_app(lifespan_enabled=False)
+    remote = TestClient(app, client=("203.0.113.10", 50000))
+    assert remote.get("/admin/api/usage").status_code == 403
 
 
 def test_admin_apply_writes_complete_managed_env_and_masks_preview(

@@ -5,6 +5,7 @@ import pytest
 from api.model_router import ModelRouter
 from api.models.anthropic import Message, MessagesRequest, TokenCountRequest
 from config.settings import Settings
+from providers.exceptions import InvalidRequestError
 
 
 @pytest.fixture
@@ -200,3 +201,94 @@ def test_model_router_logs_mapping(settings):
     assert "MODEL MAPPING" in args[0]
     assert args[1] == "claude-2.1"
     assert args[2] == "fallback-model"
+
+
+# ---- Passthrough mode (MODEL empty) ----
+
+
+def test_passthrough_routes_prefixed_provider_model(settings):
+    """MODEL empty: a provider/model from the client still routes directly (PATH A)."""
+    settings.model = None
+
+    routed = ModelRouter(settings).resolve_messages_request(
+        MessagesRequest(
+            model="kimi/kimi-k2.7-code",
+            max_tokens=100,
+            messages=[Message(role="user", content="hello")],
+        )
+    )
+
+    assert routed.resolved.provider_id == "kimi"
+    assert routed.resolved.provider_model == "kimi-k2.7-code"
+    assert routed.request.model == "kimi-k2.7-code"
+
+
+def test_passthrough_routes_gateway_model_id(settings):
+    """MODEL empty: a gateway-advertised model id still decodes and routes (PATH A)."""
+    settings.model = None
+
+    resolved = ModelRouter(settings).resolve("anthropic/kimi/kimi-k2.7-code")
+
+    assert resolved.provider_id == "kimi"
+    assert resolved.provider_model == "kimi-k2.7-code"
+
+
+def test_passthrough_honors_tier_override_for_bare_name(settings):
+    """MODEL empty but MODEL_HAIKU set: classified bare names still route (background tasks)."""
+    settings.model = None
+    settings.model_haiku = "kimi/kimi-k2.7-code-highspeed"
+
+    resolved = ModelRouter(settings).resolve("claude-3-5-haiku-20241022")
+
+    assert resolved.provider_id == "kimi"
+    assert resolved.provider_model == "kimi-k2.7-code-highspeed"
+
+
+def test_passthrough_bare_name_without_route_raises_400(settings):
+    """MODEL empty + bare name + no tier override -> actionable InvalidRequestError (400)."""
+    settings.model = None
+
+    with pytest.raises(InvalidRequestError) as exc_info:
+        ModelRouter(settings).resolve("claude-sonnet-4-20250514")
+
+    assert exc_info.value.status_code == 400
+    assert "MODEL is empty" in str(exc_info.value)
+
+
+def test_configured_model_still_maps_bare_name(settings):
+    """Regression: with MODEL set, a bare name maps to the fallback as before."""
+    resolved = ModelRouter(settings).resolve("claude-sonnet-4-20250514")
+
+    assert resolved.provider_id == "nvidia_nim"
+    assert resolved.provider_model == "fallback-model"
+
+
+# ---- Malformed provider prefix must error, never silently misroute ----
+
+
+def test_typo_provider_prefix_raises_instead_of_substring_matching(settings):
+    """Regression: a slash-shaped string with an unsupported provider must error,
+    not silently fall through to tier substring matching.
+
+    A one-character typo ("antrhopic" for "anthropic") meant the string was
+    treated as a bare Claude name instead of a rejected direct route, and it
+    silently routed to MODEL_OPUS just because "opus" is a substring of the
+    (mistyped) model string -- a completely different provider/model than
+    either the literal string or the caller intended.
+    """
+    settings.model_opus = "kimi/kimi-k2.7-thinking"
+
+    with pytest.raises(InvalidRequestError) as exc_info:
+        ModelRouter(settings).resolve("antrhopic/claude-opus-4-20250514")
+
+    assert exc_info.value.status_code == 400
+    assert "antrhopic/claude-opus-4-20250514" in str(exc_info.value)
+
+
+def test_gateway_shaped_id_with_unsupported_provider_raises(settings):
+    """A well-formed gateway id (anthropic/<provider>/<model>) whose inner
+    provider is unsupported must also error, not substring-match a tier."""
+    settings.model_sonnet = "kimi/kimi-k2.7-thinking"
+
+    with pytest.raises(InvalidRequestError):
+        ModelRouter(settings).resolve("anthropic/not_a_provider/claude-sonnet-x")

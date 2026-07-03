@@ -30,7 +30,17 @@ def get_request_pipeline(
             provider_type, app=request.app, settings=settings
         ),
         token_counter=get_token_count,
+        usage_recorder=_usage_recorder_for(request),
+        active_store=getattr(request.app.state, "active_model", None),
     )
+
+
+def _usage_recorder_for(request: Request):
+    """Return a callback that records token usage on the app's UsageTracker."""
+    tracker = getattr(request.app.state, "usage_tracker", None)
+    if tracker is None:
+        return None
+    return tracker.record
 
 
 def _probe_response(allow: str) -> Response:
@@ -97,7 +107,7 @@ async def root(
     return {
         "status": "ok",
         "provider": settings.provider_type,
-        "model": settings.model,
+        "model": settings.model or "",
     }
 
 

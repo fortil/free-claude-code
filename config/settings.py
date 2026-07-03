@@ -114,6 +114,9 @@ class Settings(BaseSettings):
     # ==================== Cerebras Inference (OpenAI-compatible) ====================
     cerebras_api_key: str = Field(default="", validation_alias="CEREBRAS_API_KEY")
 
+    # ==================== OpenAI (native Chat Completions) ====================
+    openai_api_key: str = Field(default="", validation_alias="OPENAI_API_KEY")
+
     # ==================== Messaging Platform Selection ====================
     # Valid: "telegram" | "discord" | "none"
     messaging_platform: str = Field(
@@ -150,13 +153,22 @@ class Settings(BaseSettings):
     # ==================== Model ====================
     # All Claude model requests are mapped to this single model (fallback)
     # Format: provider_type/model/name
-    model: str = "nvidia_nim/nvidia/nemotron-3-super-120b-a12b"
+    # Leave empty (MODEL="") for passthrough: FCC forwards the client's
+    # provider/model, gateway model, -keyword, or active model unchanged.
+    model: str | None = "nvidia_nim/nvidia/nemotron-3-super-120b-a12b"
 
     # Per-model overrides (optional, falls back to MODEL)
     # Each can use a different provider
     model_opus: str | None = Field(default=None, validation_alias="MODEL_OPUS")
     model_sonnet: str | None = Field(default=None, validation_alias="MODEL_SONNET")
     model_haiku: str | None = Field(default=None, validation_alias="MODEL_HAIKU")
+
+    # When true (default), refreshing models persists the discovered catalog and
+    # seeds alias/pricing files under ~/.fcc/. Turn off to keep those files
+    # curated by hand (a refresh then only updates the in-memory model cache).
+    update_models_on_refresh: bool = Field(
+        default=True, validation_alias="UPDATE_MODELS_ON_REFRESH"
+    )
 
     # ==================== Per-Provider Proxy ====================
     nvidia_nim_proxy: str = Field(default="", validation_alias="NVIDIA_NIM_PROXY")
@@ -174,6 +186,7 @@ class Settings(BaseSettings):
     gemini_proxy: str = Field(default="", validation_alias="GEMINI_PROXY")
     groq_proxy: str = Field(default="", validation_alias="GROQ_PROXY")
     cerebras_proxy: str = Field(default="", validation_alias="CEREBRAS_PROXY")
+    openai_proxy: str = Field(default="", validation_alias="OPENAI_PROXY")
 
     # ==================== Provider Rate Limiting ====================
     provider_rate_limit: int = Field(default=40, validation_alias="PROVIDER_RATE_LIMIT")
@@ -309,6 +322,7 @@ class Settings(BaseSettings):
         "allowed_telegram_user_id",
         "discord_bot_token",
         "allowed_discord_channels",
+        "model",
         "model_opus",
         "model_sonnet",
         "model_haiku",
@@ -406,7 +420,7 @@ class Settings(BaseSettings):
     @field_validator("model", "model_opus", "model_sonnet", "model_haiku")
     @classmethod
     def validate_model_format(cls, v: str | None) -> str | None:
-        if v is None:
+        if v is None or not v.strip():
             return None
         if "/" not in v:
             raise ValueError(
@@ -449,19 +463,25 @@ class Settings(BaseSettings):
 
     @property
     def provider_type(self) -> str:
-        """Extract provider type from the default model string."""
+        """Provider type of the default model, or "" when MODEL is empty (passthrough)."""
+        if not self.model:
+            return ""
         return Settings.parse_provider_type(self.model)
 
     @property
     def model_name(self) -> str:
-        """Extract the actual model name from the default model string."""
+        """Model name of the default model, or "" when MODEL is empty (passthrough)."""
+        if not self.model:
+            return ""
         return Settings.parse_model_name(self.model)
 
-    def resolve_model(self, claude_model_name: str) -> str:
+    def resolve_model(self, claude_model_name: str) -> str | None:
         """Resolve a Claude model name to the configured provider/model string.
 
-        Classifies the incoming Claude model (opus/sonnet/haiku) and
-        returns the model-specific override if configured, otherwise the fallback MODEL.
+        Classifies the incoming Claude model (opus/sonnet/haiku) and returns the
+        model-specific override if configured, otherwise the fallback MODEL. Returns
+        ``None`` when MODEL is empty and no tier override matches (passthrough mode);
+        the router then rejects unroutable bare names with a clear error.
         """
         name_lower = claude_model_name.lower()
         if "opus" in name_lower and self.model_opus is not None:
@@ -522,8 +542,9 @@ class Settings(BaseSettings):
 
     @staticmethod
     def parse_model_name(model_string: str) -> str:
-        """Extract model name from any 'provider/model' string."""
-        return model_string.split("/", 1)[1]
+        """Extract model name from a 'provider/model' string ("" if unprefixed)."""
+        _, separator, model_name = model_string.partition("/")
+        return model_name if separator else ""
 
     model_config = SettingsConfigDict(
         env_file=_env_files(),

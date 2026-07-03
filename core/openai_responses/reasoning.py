@@ -36,6 +36,9 @@ def responses_reasoning_to_thinking(value: Any) -> dict[str, Any] | None:
     if value.get("effort") == "none":
         return {"type": "disabled", "enabled": False}
     if any(item is not None for item in value.values()):
+        # Signal extended thinking on; the strict ``budget_tokens`` invariant is
+        # enforced per-provider at build time (see providers/kimi/request.py),
+        # since only some native Anthropic upstreams require/validate a budget.
         return {"type": "enabled", "enabled": True}
     return None
 

@@ -9,7 +9,12 @@ import pytest
 from loguru import logger
 
 from config.logging_config import configure_logging
-from core.trace import TRACE_PAYLOAD_BINDING, trace_event, traced_async_stream
+from core.trace import (
+    TRACE_PAYLOAD_BINDING,
+    log_context_stream,
+    trace_event,
+    traced_async_stream,
+)
 
 
 def _json_log_rows(log_file: str) -> list[dict]:
@@ -102,6 +107,94 @@ async def test_traced_async_stream_logs_real_exception(tmp_path) -> None:
     assert interrupted[0]["stream_chunks"] == 1
     assert interrupted[0]["outcome"] == "error"
     assert interrupted[0]["exc_type"] == "RuntimeError"
+
+
+@pytest.mark.asyncio
+async def test_log_context_stream_tags_provider_log_lines(tmp_path) -> None:
+    """Log lines emitted while a stream is consumed carry the active model.
+
+    Provider-agnostic: works for any transport because it wraps the stream at
+    the API chokepoint, not inside a specific provider.
+    """
+    log_file = str(tmp_path / "model_ctx.log")
+    configure_logging(log_file, force=True)
+
+    async def provider_stream():
+        # Stand in for a provider emitting log lines mid-stream.
+        logger.debug("provider emitting chunk")
+        yield "hello"
+        trace_event(stage="provider", event="provider.mid", source="unit")
+        yield " world"
+
+    chunks = [
+        chunk
+        async for chunk in log_context_stream(
+            provider_stream(), model="nvidia_nim/nemotron"
+        )
+    ]
+
+    assert chunks == ["hello", " world"]
+    rows = _json_log_rows(log_file)
+    tagged = [row for row in rows if row.get("model") == "nvidia_nim/nemotron"]
+    # Both the plain debug line and the trace_event row are tagged.
+    messages = {row["message"] for row in tagged}
+    assert "provider emitting chunk" in messages
+    assert any(row.get("event") == "provider.mid" for row in tagged)
+
+
+@pytest.mark.asyncio
+async def test_log_context_stream_tags_traced_completion_event(tmp_path) -> None:
+    """The egress completion event emitted by traced_async_stream is tagged too.
+
+    Mirrors the real composition in ApiRequestPipeline._provider_stream:
+    log_context_stream(traced_async_stream(...), model=...).
+    """
+    log_file = str(tmp_path / "model_ctx_traced.log")
+    configure_logging(log_file, force=True)
+
+    async def provider_stream():
+        yield "a"
+        yield "b"
+
+    traced = traced_async_stream(
+        provider_stream(),
+        stage="egress",
+        source="unit",
+        complete_event="stream.completed",
+        interrupted_event="stream.interrupted",
+        extra={"request_id": "req_model"},
+    )
+
+    chunks = [
+        chunk async for chunk in log_context_stream(traced, model="openai/gpt-4o")
+    ]
+
+    assert chunks == ["a", "b"]
+    rows = _json_log_rows(log_file)
+    completed = [row for row in rows if row.get("event") == "stream.completed"]
+    assert len(completed) == 1
+    assert completed[0]["model"] == "openai/gpt-4o"
+    assert completed[0]["request_id"] == "req_model"
+
+
+@pytest.mark.asyncio
+async def test_log_context_stream_clears_context_after_stream(tmp_path) -> None:
+    """The model context does not leak to log lines emitted after the stream."""
+    log_file = str(tmp_path / "model_ctx_clear.log")
+    configure_logging(log_file, force=True)
+
+    async def provider_stream():
+        yield "x"
+
+    async for _chunk in log_context_stream(provider_stream(), model="leaky/model"):
+        pass
+
+    logger.debug("after stream finished")
+
+    rows = _json_log_rows(log_file)
+    after = [row for row in rows if row.get("message") == "after stream finished"]
+    assert len(after) == 1
+    assert "model" not in after[0]
 
 
 @pytest.mark.asyncio

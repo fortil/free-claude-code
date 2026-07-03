@@ -1,15 +1,19 @@
 from __future__ import annotations
 
+import json
 from collections.abc import AsyncIterator
+from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
 from fastapi.responses import StreamingResponse
+from loguru import logger
 
 from api.models.anthropic import Message, MessagesRequest
 from api.models.openai_responses import OpenAIResponsesRequest
 from api.request_pipeline import ApiRequestPipeline
+from config.logging_config import configure_logging
 from config.settings import Settings
 from providers.base import BaseProvider, ProviderConfig
 
@@ -63,6 +67,189 @@ async def _streaming_body_text(response: StreamingResponse) -> str:
 
 
 @pytest.mark.asyncio
+async def test_pipeline_prompt_keyword_overrides_routed_model(monkeypatch):
+    """A leading -keyword reroutes the request and is stripped from the prompt."""
+    monkeypatch.setattr(
+        "api.prompt_model_keyword.load_aliases",
+        lambda: {"kimi2.7": "kimi/kimi-k2.7-code"},
+    )
+    seen: dict[str, str] = {}
+    provider = FakeProvider()
+
+    def _getter(provider_id: str) -> FakeProvider:
+        seen["provider_id"] = provider_id
+        return provider
+
+    pipeline = ApiRequestPipeline(Settings(), provider_getter=_getter)
+    request = MessagesRequest(
+        model="nvidia_nim/test-model",
+        max_tokens=100,
+        messages=[Message(role="user", content="-kimi2.7 refactor this")],
+    )
+
+    response = pipeline.create_message(request)
+    assert isinstance(response, StreamingResponse)
+    await _streaming_body_text(response)
+
+    # Routed to the aliased provider + downstream model, token stripped.
+    assert seen["provider_id"] == "kimi"
+    assert provider.requests[0].model == "kimi-k2.7-code"
+    assert provider.requests[0].messages[-1].content == "refactor this"
+
+
+@pytest.mark.asyncio
+async def test_pipeline_active_model_persists_across_requests(monkeypatch, tmp_path):
+    """A keyword sets a persisted model that later keyword-less requests reuse."""
+    monkeypatch.setattr(
+        "api.prompt_model_keyword.load_aliases",
+        lambda: {"kimi2.7": "kimi/kimi-k2.7-code"},
+    )
+    from config.active_model import ActiveModelStore
+
+    store = ActiveModelStore(path=tmp_path / "active-model.json")
+    seen: list[str] = []
+    provider = FakeProvider()
+
+    def _getter(provider_id: str) -> FakeProvider:
+        seen.append(provider_id)
+        return provider
+
+    pipeline = ApiRequestPipeline(
+        Settings(), provider_getter=_getter, active_store=store
+    )
+
+    # Turn 1: keyword selects + persists kimi.
+    r1 = pipeline.create_message(
+        MessagesRequest(
+            model="nvidia_nim/test-model",
+            max_tokens=100,
+            messages=[Message(role="user", content="-kimi2.7 start")],
+        )
+    )
+    assert isinstance(r1, StreamingResponse)
+    await _streaming_body_text(r1)
+
+    # Turn 2: no keyword (e.g. after compaction) still routes to the persisted model.
+    r2 = pipeline.create_message(
+        MessagesRequest(
+            model="nvidia_nim/test-model",
+            max_tokens=100,
+            messages=[Message(role="user", content="plain follow up")],
+        )
+    )
+    assert isinstance(r2, StreamingResponse)
+    await _streaming_body_text(r2)
+
+    assert seen == ["kimi", "kimi"]
+    assert provider.requests[0].model == "kimi-k2.7-code"
+    assert provider.requests[1].model == "kimi-k2.7-code"
+
+
+@pytest.mark.asyncio
+async def test_pipeline_records_usage_under_active_override():
+    """Usage is attributed to the active-override model, not the request's nominal one.
+
+    Regression: a persisted -keyword (e.g. kimi-k2.6) silently routes every request
+    to that model; the Usage tab must then show kimi-k2.6, which is what is really used.
+    """
+    recorded: list[tuple] = []
+
+    class _Store:
+        def load(self) -> str | None:
+            return "kimi/kimi-k2.6"
+
+        def save(self, model_ref: str) -> None:
+            pass
+
+        def clear(self) -> None:
+            pass
+
+    class UsageProvider(FakeProvider):
+        async def stream_response(
+            self,
+            request: Any,
+            input_tokens: int = 0,
+            *,
+            request_id: str | None = None,
+            thinking_enabled: bool | None = None,
+        ) -> AsyncIterator[str]:
+            self.requests.append(request)
+            yield (
+                'event: message_start\ndata: {"type":"message_start",'
+                '"message":{"usage":{"input_tokens":50,"output_tokens":1}}}\n\n'
+            )
+            yield (
+                'event: message_delta\ndata: {"type":"message_delta",'
+                '"usage":{"input_tokens":50,"output_tokens":9}}\n\n'
+            )
+            yield 'event: message_stop\ndata: {"type":"message_stop"}\n\n'
+
+    provider = UsageProvider()
+    pipeline = ApiRequestPipeline(
+        Settings(),
+        provider_getter=lambda _: provider,
+        usage_recorder=lambda p, m, i, o: recorded.append((p, m, i, o)),
+        active_store=_Store(),
+    )
+    # The request nominally asks for nvidia_nim/test-model, but the active override wins.
+    request = MessagesRequest(
+        model="nvidia_nim/test-model",
+        max_tokens=100,
+        messages=[Message(role="user", content="plain prompt, no keyword")],
+    )
+
+    response = pipeline.create_message(request)
+    assert isinstance(response, StreamingResponse)
+    await _streaming_body_text(response)
+
+    assert recorded == [("kimi", "kimi-k2.6", 50, 9)]
+    assert provider.requests[0].model == "kimi-k2.6"
+
+
+@pytest.mark.asyncio
+async def test_pipeline_records_token_usage():
+    """A completed request reports (provider_id, provider_model, in, out) tokens."""
+    recorded: list[tuple] = []
+
+    class UsageProvider(FakeProvider):
+        async def stream_response(
+            self,
+            request: Any,
+            input_tokens: int = 0,
+            *,
+            request_id: str | None = None,
+            thinking_enabled: bool | None = None,
+        ) -> AsyncIterator[str]:
+            yield (
+                'event: message_start\ndata: {"type":"message_start",'
+                '"message":{"usage":{"input_tokens":80,"output_tokens":1}}}\n\n'
+            )
+            yield (
+                'event: message_delta\ndata: {"type":"message_delta",'
+                '"usage":{"input_tokens":80,"output_tokens":12}}\n\n'
+            )
+            yield 'event: message_stop\ndata: {"type":"message_stop"}\n\n'
+
+    provider = UsageProvider()
+    pipeline = ApiRequestPipeline(
+        Settings(),
+        provider_getter=lambda _: provider,
+        usage_recorder=lambda p, m, i, o: recorded.append((p, m, i, o)),
+    )
+    request = MessagesRequest(
+        model="nvidia_nim/test-model",
+        max_tokens=100,
+        messages=[Message(role="user", content="hi")],
+    )
+
+    response = pipeline.create_message(request)
+    assert isinstance(response, StreamingResponse)
+    await _streaming_body_text(response)
+
+    assert recorded == [("nvidia_nim", "test-model", 80, 12)]
+
+
+@pytest.mark.asyncio
 async def test_pipeline_provider_execution_passes_routed_request_and_stream_metadata():
     provider = FakeProvider()
     pipeline = ApiRequestPipeline(Settings(), provider_getter=lambda _: provider)
@@ -98,6 +285,104 @@ def test_pipeline_message_optimization_intercepts_before_provider_execution():
         assert pipeline.create_message(request) is optimized
 
     provider_getter.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_pipeline_logs_active_model_and_tags_provider_stream(tmp_path):
+    """The active downstream model is logged once per request and tags stream logs.
+
+    Verifies the provider-agnostic chokepoint: a concise console line names the
+    model, and every log line the provider emits while streaming carries the
+    model field (works regardless of transport family).
+    """
+    log_file = tmp_path / "pipeline.log"
+    configure_logging(str(log_file), force=True)
+
+    class LoggingProvider(FakeProvider):
+        async def stream_response(
+            self,
+            request: Any,
+            input_tokens: int = 0,
+            *,
+            request_id: str | None = None,
+            thinking_enabled: bool | None = None,
+        ) -> AsyncIterator[str]:
+            logger.debug("provider streaming a chunk")
+            yield 'event: message_start\ndata: {"type":"message_start"}\n\n'
+            yield 'event: message_stop\ndata: {"type":"message_stop"}\n\n'
+
+    provider = LoggingProvider()
+    pipeline = ApiRequestPipeline(Settings(), provider_getter=lambda _: provider)
+    request = MessagesRequest(
+        model="nvidia_nim/test-model",
+        max_tokens=100,
+        messages=[Message(role="user", content="hi")],
+    )
+
+    response = pipeline.create_message(request)
+    assert isinstance(response, StreamingResponse)
+    await _streaming_body_text(response)
+    logger.complete()
+
+    rows = [
+        json.loads(line)
+        for line in Path(log_file).read_text(encoding="utf-8").strip().split("\n")
+        if line
+    ]
+    # Concise routing line names the active downstream model.
+    console_rows = [
+        r for r in rows if r.get("message", "").startswith("model: test-model")
+    ]
+    assert console_rows and console_rows[0]["model"] == "test-model"
+    # The provider's own mid-stream log line is tagged with the active model.
+    provider_rows = [
+        r for r in rows if r.get("message") == "provider streaming a chunk"
+    ]
+    assert provider_rows and provider_rows[0]["model"] == "test-model"
+
+
+@pytest.mark.asyncio
+async def test_pipeline_passthrough_bare_name_raises_400():
+    """MODEL empty + bare unmapped name -> InvalidRequestError (400), no provider call."""
+    from providers.exceptions import InvalidRequestError
+
+    settings = Settings()
+    settings.model = None
+    settings.model_opus = settings.model_sonnet = settings.model_haiku = None
+    provider = FakeProvider()
+    pipeline = ApiRequestPipeline(settings, provider_getter=lambda _: provider)
+    request = MessagesRequest(
+        model="claude-sonnet-4-20250514",
+        max_tokens=100,
+        messages=[Message(role="user", content="hi")],
+    )
+
+    with pytest.raises(InvalidRequestError) as exc_info:
+        pipeline.create_message(request)
+
+    assert exc_info.value.status_code == 400
+    assert "MODEL is empty" in str(exc_info.value)
+    assert provider.requests == []
+
+
+@pytest.mark.asyncio
+async def test_pipeline_passthrough_provider_model_streams():
+    """MODEL empty + client provider/model -> routes through and streams normally."""
+    settings = Settings()
+    settings.model = None
+    provider = FakeProvider()
+    pipeline = ApiRequestPipeline(settings, provider_getter=lambda _: provider)
+    request = MessagesRequest(
+        model="kimi/kimi-k2.7-code",
+        max_tokens=100,
+        messages=[Message(role="user", content="hi")],
+    )
+
+    response = pipeline.create_message(request)
+    assert isinstance(response, StreamingResponse)
+    await _streaming_body_text(response)
+
+    assert provider.requests[0].model == "kimi-k2.7-code"
 
 
 @pytest.mark.asyncio
