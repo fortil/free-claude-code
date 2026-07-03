@@ -44,11 +44,21 @@ class AdminConfigPayload(BaseModel):
     values: dict[str, Any] = Field(default_factory=dict)
 
 
+_UNSPECIFIED_HOSTS = frozenset({"0.0.0.0", "::"})
+
+
 def _is_loopback_host(host: str | None) -> bool:
     if host is None:
         return False
     normalized = host.strip().strip("[]").lower()
     if normalized == "localhost":
+        return True
+    if normalized in _UNSPECIFIED_HOSTS:
+        # HOST=0.0.0.0/:: binds all interfaces but is browsed from the same
+        # machine as loopback (see admin_urls._browser_host_for_local_urls).
+        # A same-machine POST to that URL sends Origin: http://0.0.0.0:<port>,
+        # which would otherwise fail this check even though the request never
+        # left the host.
         return True
     try:
         return ipaddress.ip_address(normalized).is_loopback

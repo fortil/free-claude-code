@@ -50,6 +50,36 @@ def test_admin_page_is_loopback_only(monkeypatch, tmp_path):
     assert remote_client.get("/admin").status_code == 403
 
 
+def test_admin_config_apply_accepts_unspecified_host_origin(monkeypatch, tmp_path):
+    """HOST=0.0.0.0 users browse /admin at http://0.0.0.0:<port>/admin from the same
+    machine; the resulting Origin header must not be rejected as non-local."""
+    _set_home(monkeypatch, tmp_path)
+    _clear_process_config(monkeypatch)
+    app = create_app(lifespan_enabled=False)
+
+    response = _local_client(app).post(
+        "/admin/api/config/validate",
+        json={"values": {}},
+        headers={"origin": "http://0.0.0.0:8082"},
+    )
+
+    assert response.status_code == 200
+
+
+def test_admin_config_apply_rejects_remote_origin(monkeypatch, tmp_path):
+    _set_home(monkeypatch, tmp_path)
+    _clear_process_config(monkeypatch)
+    app = create_app(lifespan_enabled=False)
+
+    response = _local_client(app).post(
+        "/admin/api/config/validate",
+        json={"values": {}},
+        headers={"origin": "http://evil.example.com"},
+    )
+
+    assert response.status_code == 403
+
+
 def test_admin_page_no_longer_renders_generated_env_panel(monkeypatch, tmp_path):
     _set_home(monkeypatch, tmp_path)
     app = create_app(lifespan_enabled=False)
