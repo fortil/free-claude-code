@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 from dotenv import dotenv_values
 from pydantic import Field, field_validator, model_validator
@@ -14,6 +15,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 from .constants import HTTP_CONNECT_TIMEOUT_DEFAULT
 from .nim import NimSettings
 from .paths import default_claude_workspace_path, managed_env_path
+from .provider_catalog import KIMI_DEFAULT_BASE
 from .provider_ids import SUPPORTED_PROVIDER_IDS
 
 
@@ -91,6 +93,12 @@ class Settings(BaseSettings):
 
     # ==================== Kimi Config ====================
     kimi_api_key: str = Field(default="", validation_alias="KIMI_API_KEY")
+    # Default is the pay-as-you-go open platform. Override to the Kimi Code
+    # subscription endpoint (https://api.kimi.com/coding/v1) to route Haiku (or
+    # any tier) to the flat-fee membership instead of api.moonshot.ai.
+    kimi_base_url: str = Field(
+        default=KIMI_DEFAULT_BASE, validation_alias="KIMI_BASE_URL"
+    )
 
     # ==================== Wafer Config ====================
     wafer_api_key: str = Field(default="", validation_alias="WAFER_API_KEY")
@@ -414,6 +422,18 @@ class Settings(BaseSettings):
             raise ValueError(
                 "OLLAMA_BASE_URL must be the Ollama root URL for native Anthropic "
                 "messages, e.g. http://localhost:11434 (without /v1)."
+            )
+        return v
+
+    @field_validator("kimi_base_url")
+    @classmethod
+    def validate_kimi_base_url(cls, v: str) -> str:
+        if urlsplit(v).hostname == "api.kimi.com" and not v.rstrip("/").endswith("/v1"):
+            raise ValueError(
+                "KIMI_BASE_URL for the Kimi Code subscription must end in /v1, "
+                "e.g. https://api.kimi.com/coding/v1. Without /v1 the Anthropic "
+                "Messages transport posts to .../coding/messages instead of "
+                ".../coding/v1/messages."
             )
         return v
 

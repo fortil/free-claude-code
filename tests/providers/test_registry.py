@@ -122,6 +122,22 @@ def test_zai_descriptor_uses_fixed_cloud_base_url():
     assert descriptor.base_url_attr is None
 
 
+def test_kimi_descriptor_exposes_base_url_attr():
+    """Kimi's base URL is overridable (unlike Z.ai), for the subscription endpoint."""
+    descriptor = PROVIDER_DESCRIPTORS["kimi"]
+
+    assert descriptor.base_url_attr == "kimi_base_url"
+
+
+def test_build_provider_config_applies_kimi_base_url_override():
+    descriptor = PROVIDER_DESCRIPTORS["kimi"]
+    settings = _make_settings(kimi_base_url="https://api.kimi.com/coding/v1")
+
+    config = build_provider_config(descriptor, settings)
+
+    assert config.base_url == "https://api.kimi.com/coding/v1"
+
+
 def test_zai_provider_config_ignores_stale_base_url_setting():
     descriptor = PROVIDER_DESCRIPTORS["zai"]
 

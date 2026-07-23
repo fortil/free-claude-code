@@ -282,6 +282,39 @@ This provider calls Kimi's **Anthropic-compatible** Messages API (`https://api.m
 
 Browse models at [platform.moonshot.ai](https://platform.moonshot.ai).
 
+#### Kimi Code subscription
+
+The default above talks to Moonshot's pay-as-you-go **open platform**. If you
+have a **Kimi Code** flat-fee membership instead (the same one the `kimi` CLI
+and Claude Code log into), route through it by setting:
+
+```
+KIMI_BASE_URL="https://api.kimi.com/coding/v1"
+KIMI_API_KEY="<your Kimi Code Console key>"
+MODEL_HAIKU="kimi/k3[1m]"
+```
+
+The trailing `/v1` is required — `KIMI_BASE_URL` is validated to reject
+`https://api.kimi.com/coding/` (no `/v1`), which would silently post to
+`.../coding/messages` instead of `.../coding/v1/messages`. Model discovery at
+startup automatically follows the override to
+`https://api.kimi.com/coding/v1/models`, so a misconfigured or wrong model id
+fails fast at boot instead of billing a request.
+
+**Never routes to the pay-per-token platform once overridden**: with
+`KIMI_BASE_URL` set to the subscription endpoint, the fail-fast startup check
+validates `MODEL_HAIKU` (or any tier routed to `kimi`) against the
+subscription's own catalog, not `api.moonshot.ai`.
+
+**User-Agent policy**: the Kimi Code endpoint allowlists known coding-agent
+clients (Claude Code among them) by `User-Agent`. FCC forwards the inbound
+client's `User-Agent` byte-exact to the upstream request; it never fabricates
+or rewrites one. If a request arrives with no `User-Agent` at all (or from a
+non-whitelisted client), no header is added and httpx's own default is sent —
+the upstream may then reject it, which is expected and not worked around.
+Startup model discovery has no inbound request to forward, so it never
+attaches a `User-Agent` either.
+
 ### 11. [Cerebras Inference](https://inference-docs.cerebras.ai/quickstart)
 
 Sign up and create an API key in the [Cerebras Cloud Console](https://cloud.cerebras.ai) (see [Quickstart](https://inference-docs.cerebras.ai/quickstart)).

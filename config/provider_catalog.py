@@ -152,6 +152,7 @@ PROVIDER_CATALOG: dict[str, ProviderDescriptor] = {
         credential_url="https://platform.moonshot.cn/console/api-keys",
         credential_attr="kimi_api_key",
         default_base_url=KIMI_DEFAULT_BASE,
+        base_url_attr="kimi_base_url",
         proxy_attr="kimi_proxy",
         capabilities=(
             "chat",

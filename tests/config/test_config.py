@@ -246,6 +246,55 @@ class TestSettings:
         with pytest.raises(ValidationError, match="without /v1"):
             Settings()
 
+    def test_kimi_base_url_defaults_to_open_platform(self, monkeypatch):
+        """KIMI_BASE_URL defaults to the pay-as-you-go open platform."""
+        from config.settings import Settings
+        from providers.defaults import KIMI_DEFAULT_BASE
+
+        monkeypatch.delenv("KIMI_BASE_URL", raising=False)
+        monkeypatch.setitem(Settings.model_config, "env_file", ())
+        settings = Settings()
+        assert settings.kimi_base_url == KIMI_DEFAULT_BASE
+
+    def test_kimi_base_url_from_env_applies_subscription_override(self, monkeypatch):
+        """KIMI_BASE_URL env var overrides the default to the subscription endpoint."""
+        from config.settings import Settings
+
+        monkeypatch.setenv("KIMI_BASE_URL", "https://api.kimi.com/coding/v1")
+        settings = Settings()
+        assert settings.kimi_base_url == "https://api.kimi.com/coding/v1"
+
+    def test_kimi_base_url_rejects_subscription_host_without_v1_suffix(
+        self, monkeypatch
+    ):
+        """The spec's suggested value (trailing slash, no /v1) is a footgun; reject it."""
+        from config.settings import Settings
+
+        monkeypatch.setenv("KIMI_BASE_URL", "https://api.kimi.com/coding/")
+        with pytest.raises(ValidationError, match="must end in /v1"):
+            Settings()
+
+    def test_kimi_base_url_default_moonshot_host_does_not_trigger_validator(
+        self, monkeypatch
+    ):
+        """The default open-platform host (api.moonshot.ai) is untouched by the guard."""
+        from config.settings import Settings
+        from providers.defaults import KIMI_DEFAULT_BASE
+
+        monkeypatch.setenv("KIMI_BASE_URL", KIMI_DEFAULT_BASE)
+        settings = Settings()
+        assert settings.kimi_base_url == KIMI_DEFAULT_BASE
+
+    def test_model_haiku_kimi_k3_1m_survives_validation_and_parsing(self, monkeypatch):
+        """The bracketed k3[1m] model id survives MODEL_HAIKU's format validator."""
+        from config.settings import Settings
+
+        monkeypatch.setenv("MODEL_HAIKU", "kimi/k3[1m]")
+        settings = Settings()
+        assert settings.model_haiku == "kimi/k3[1m]"
+        assert Settings.parse_provider_type(settings.model_haiku) == "kimi"
+        assert Settings.parse_model_name(settings.model_haiku) == "k3[1m]"
+
     def test_provider_rate_limit_from_env(self, monkeypatch):
         """PROVIDER_RATE_LIMIT env var is loaded into settings."""
         from config.settings import Settings

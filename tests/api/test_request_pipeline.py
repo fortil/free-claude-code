@@ -2,20 +2,26 @@ from __future__ import annotations
 
 import json
 from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
+import httpx
 import pytest
 from fastapi.responses import StreamingResponse
+from fastapi.testclient import TestClient
 from loguru import logger
 
+from api import dependencies
+from api.app import create_app
 from api.models.anthropic import Message, MessagesRequest
 from api.models.openai_responses import OpenAIResponsesRequest
 from api.request_pipeline import ApiRequestPipeline
 from config.logging_config import configure_logging
 from config.settings import Settings
 from providers.base import BaseProvider, ProviderConfig
+from providers.kimi import KimiProvider
 
 
 class FakeProvider(BaseProvider):
@@ -405,3 +411,142 @@ async def test_pipeline_responses_bypass_message_only_optimizations():
     body = await _streaming_body_text(response)
     assert "response.completed" in body
     assert provider.requests[0].messages[0].content == "quota check"
+
+
+# =============================================================================
+# End-to-end User-Agent forwarding guardrail (real FastAPI/ASGI stack)
+#
+# `get_request_pipeline` (api/routes.py) MUST stay `async def`: FastAPI runs
+# sync dependencies in a threadpool, where a contextvars.ContextVar `.set()`
+# is confined to that worker thread's context copy and never reaches the
+# request's own asyncio task, so the inbound User-Agent would be set and
+# silently discarded (the stream would see UNSET, forwarding nothing).
+# Verified empirically before this test was written: a sync dependency here
+# makes the assertions below fail with the httpx default UA instead of the
+# forwarded one. Unit tests on KimiProvider alone can't catch this regression
+# because they never go through a real FastAPI dependency-injection threadpool
+# boundary -- only a TestClient hitting the real ASGI app can.
+# =============================================================================
+
+
+_KIMI_SUBSCRIPTION_BASE = "https://api.kimi.com/coding/v1"
+_TERMINAL_SSE_BODY = (
+    b"event: message_start\n"
+    b'data: {"type":"message_start","message":{"usage":{"input_tokens":1,'
+    b'"output_tokens":0}}}\n\n'
+    b"event: message_stop\n"
+    b'data: {"type":"message_stop"}\n\n'
+)
+
+
+@pytest.fixture
+def _kimi_provider_with_captured_headers():
+    """A real KimiProvider (subscription base) whose outgoing send is captured.
+
+    Only ``httpx.AsyncClient.send`` is replaced (no network I/O); ``build_request``
+    stays real so the actual httpx client-vs-request header merge runs, which is
+    exactly the behavior under test (omitted key -> httpx's own default UA wins;
+    present key -> it overrides the default).
+    """
+    config = ProviderConfig(
+        api_key="test-kimi-subscription-key",
+        base_url=_KIMI_SUBSCRIPTION_BASE,
+        rate_limit=50,
+        rate_window=60,
+    )
+    provider = KimiProvider(config)
+    captured: list[httpx.Request] = []
+
+    async def _fake_send(request: httpx.Request, **_kwargs: Any) -> httpx.Response:
+        captured.append(request)
+        return httpx.Response(200, request=request, content=_TERMINAL_SSE_BODY)
+
+    provider._client.send = AsyncMock(side_effect=_fake_send)
+
+    @asynccontextmanager
+    async def _slot():
+        yield
+
+    with patch(
+        "providers.transports.anthropic_messages.transport.GlobalRateLimiter"
+    ) as mock_limiter:
+        instance = mock_limiter.get_scoped_instance.return_value
+
+        async def _passthrough(fn, *args, **kwargs):
+            return await fn(*args, **kwargs)
+
+        instance.execute_with_retry = AsyncMock(side_effect=_passthrough)
+        instance.concurrency_slot.side_effect = _slot
+        yield provider, captured
+
+
+def _haiku_payload() -> dict[str, Any]:
+    return {
+        "model": "claude-3-haiku-20240307",
+        "max_tokens": 100,
+        "messages": [{"role": "user", "content": "hi"}],
+    }
+
+
+def test_kimi_subscription_forwards_inbound_user_agent_end_to_end(
+    _kimi_provider_with_captured_headers,
+):
+    """Haiku -> kimi/k3[1m] (subscription base): outbound UA == inbound UA, byte-exact."""
+    provider, captured = _kimi_provider_with_captured_headers
+    settings = Settings()
+    settings.model_haiku = "kimi/k3[1m]"
+    settings.kimi_base_url = _KIMI_SUBSCRIPTION_BASE
+    settings.kimi_api_key = "test-kimi-subscription-key"
+
+    app = create_app(lifespan_enabled=False)
+    app.dependency_overrides[dependencies.get_settings] = lambda: settings
+
+    try:
+        with (
+            patch("api.dependencies.resolve_provider", return_value=provider),
+            TestClient(app) as client,
+        ):
+            response = client.post(
+                "/v1/messages",
+                headers={"User-Agent": "claude-cli/1.2.3 (external, cli)"},
+                json=_haiku_payload(),
+            )
+
+            assert response.status_code == 200
+            assert len(captured) == 1
+            assert (
+                captured[0].headers["user-agent"] == "claude-cli/1.2.3 (external, cli)"
+            )
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_kimi_subscription_omits_user_agent_header_when_none_inbound(
+    _kimi_provider_with_captured_headers,
+):
+    """No inbound UA -> FCC never fabricates one; httpx's own default UA is sent."""
+    provider, captured = _kimi_provider_with_captured_headers
+    settings = Settings()
+    settings.model_haiku = "kimi/k3[1m]"
+    settings.kimi_base_url = _KIMI_SUBSCRIPTION_BASE
+    settings.kimi_api_key = "test-kimi-subscription-key"
+
+    app = create_app(lifespan_enabled=False)
+    app.dependency_overrides[dependencies.get_settings] = lambda: settings
+
+    try:
+        with (
+            patch("api.dependencies.resolve_provider", return_value=provider),
+            TestClient(app) as client,
+        ):
+            del client.headers["user-agent"]
+
+            response = client.post("/v1/messages", json=_haiku_payload())
+
+            assert response.status_code == 200
+            assert len(captured) == 1
+            outgoing_ua = captured[0].headers.get("user-agent", "")
+            assert outgoing_ua.startswith("python-httpx/")
+            assert "claude" not in outgoing_ua.lower()
+    finally:
+        app.dependency_overrides.clear()

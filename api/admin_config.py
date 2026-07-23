@@ -13,7 +13,7 @@ from dotenv import dotenv_values
 from pydantic import ValidationError
 
 from config.paths import managed_env_path
-from config.provider_catalog import PROVIDER_CATALOG
+from config.provider_catalog import KIMI_DEFAULT_BASE, PROVIDER_CATALOG
 from config.settings import Settings
 
 FieldType = Literal[
@@ -261,6 +261,20 @@ FIELDS: tuple[ConfigFieldSpec, ...] = (
         description=(
             "OpenAI API key (create in [API keys](https://platform.openai.com/api-keys)); "
             "see [Chat Completions docs](https://platform.openai.com/docs/api-reference/chat)."
+        ),
+    ),
+    ConfigFieldSpec(
+        "KIMI_BASE_URL",
+        "Kimi Base URL",
+        "providers",
+        settings_attr="kimi_base_url",
+        default=KIMI_DEFAULT_BASE,
+        description=(
+            "Default is the pay-as-you-go open platform (api.moonshot.ai). Set to "
+            "https://api.kimi.com/coding/v1 to route through the flat-fee Kimi "
+            "Code subscription instead (requires a Console key in "
+            "KIMI_API_KEY). Applies to providers created after this change "
+            "(process-cached, like LM Studio's base URL); restart to apply."
         ),
     ),
     ConfigFieldSpec(

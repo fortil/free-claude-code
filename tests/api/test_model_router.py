@@ -77,6 +77,63 @@ def test_model_router_applies_haiku_override(settings):
     assert routed.resolved.provider_model_ref == "lmstudio/qwen2.5-7b"
 
 
+def test_model_router_applies_haiku_override_to_kimi_k3_subscription(settings):
+    """Haiku routed to the Kimi Code subscription model; brackets survive routing."""
+    settings.model_haiku = "kimi/k3[1m]"
+
+    routed = ModelRouter(settings).resolve_messages_request(
+        MessagesRequest(
+            model="claude-3-haiku-20240307",
+            max_tokens=100,
+            messages=[Message(role="user", content="hello")],
+        )
+    )
+
+    assert routed.request.model == "k3[1m]"
+    assert routed.resolved.provider_id == "kimi"
+    assert routed.resolved.provider_model == "k3[1m]"
+    assert routed.resolved.provider_model_ref == "kimi/k3[1m]"
+
+
+def test_model_router_resolves_direct_kimi_k3_subscription_model(settings):
+    """A client-supplied provider/model of kimi/k3[1m] routes directly (PATH A)."""
+    resolved = ModelRouter(settings).resolve("kimi/k3[1m]")
+
+    assert resolved.provider_id == "kimi"
+    assert resolved.provider_model == "k3[1m]"
+    assert resolved.provider_model_ref == "kimi/k3[1m]"
+
+
+def test_model_router_resolves_gateway_kimi_k3_subscription_model(settings):
+    """A gateway-encoded provider/model of kimi/k3[1m] decodes and routes."""
+    resolved = ModelRouter(settings).resolve("anthropic/kimi/k3[1m]")
+
+    assert resolved.provider_id == "kimi"
+    assert resolved.provider_model == "k3[1m]"
+
+
+def test_model_router_haiku_kimi_k3_override_does_not_affect_opus_or_sonnet(settings):
+    """Non-regression: activating the Haiku->Kimi K3 subscription override leaves
+    Opus/Sonnet resolving through their own configured routes, untouched."""
+    settings.model_haiku = "kimi/k3[1m]"
+    settings.model_opus = "open_router/deepseek/deepseek-r1"
+    settings.model_sonnet = "nvidia_nim/meta/llama-3.3-70b-instruct"
+
+    router = ModelRouter(settings)
+
+    opus = router.resolve("claude-opus-4-20250514")
+    assert opus.provider_id == "open_router"
+    assert opus.provider_model == "deepseek/deepseek-r1"
+
+    sonnet = router.resolve("claude-sonnet-4-20250514")
+    assert sonnet.provider_id == "nvidia_nim"
+    assert sonnet.provider_model == "meta/llama-3.3-70b-instruct"
+
+    haiku = router.resolve("claude-3-haiku-20240307")
+    assert haiku.provider_id == "kimi"
+    assert haiku.provider_model == "k3[1m]"
+
+
 def test_model_router_applies_sonnet_override(settings):
     settings.model_sonnet = "nvidia_nim/meta/llama-3.3-70b-instruct"
 

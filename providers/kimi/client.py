@@ -6,6 +6,7 @@ from typing import Any
 
 import httpx
 
+from core.http_context import get_inbound_user_agent
 from providers.base import ProviderConfig
 from providers.defaults import KIMI_DEFAULT_BASE
 from providers.transports.anthropic_messages import AnthropicMessagesTransport
@@ -35,19 +36,37 @@ class KimiProvider(AnthropicMessagesTransport):
         )
 
     def _request_headers(self) -> dict[str, str]:
-        return {
+        headers = {
             "Accept": "text/event-stream",
             "Authorization": f"Bearer {self._api_key}",
             "Content-Type": "application/json",
             "anthropic-version": _ANTHROPIC_VERSION,
         }
+        # The Kimi Code subscription endpoint allowlists known coding-agent
+        # clients (Claude Code among them) by User-Agent. Forward the inbound
+        # client's UA byte-exact when present; never fabricate one -- if there
+        # is no inbound UA (e.g. startup model discovery), omit the header and
+        # let httpx send its own honest default.
+        inbound_user_agent = get_inbound_user_agent()
+        if inbound_user_agent:
+            headers["User-Agent"] = inbound_user_agent
+        return headers
 
     async def _send_model_list_request(self) -> httpx.Response:
-        """Models are listed from the OpenAI-compat root, not ``/anthropic/v1``."""
-        return await self._client.get(
-            _MOONSHOT_OPENAI_MODELS_URL,
-            headers=self._model_list_headers(),
-        )
+        """Query the model-list endpoint matching the configured base URL.
+
+        The default open-platform base (``api.moonshot.ai/anthropic/v1``) lists
+        models from a separate OpenAI-compat root, not under ``/anthropic/v1``.
+        Any overridden base (e.g. the Kimi Code subscription at
+        ``api.kimi.com/coding/v1``) lists models at ``{base_url}/models``, so we
+        delegate to the shared transport implementation for that case.
+        """
+        if self._base_url == KIMI_DEFAULT_BASE.rstrip("/"):
+            return await self._client.get(
+                _MOONSHOT_OPENAI_MODELS_URL,
+                headers=self._model_list_headers(),
+            )
+        return await super()._send_model_list_request()
 
     def _model_list_headers(self) -> dict[str, str]:
         return {"Authorization": f"Bearer {self._api_key}"}

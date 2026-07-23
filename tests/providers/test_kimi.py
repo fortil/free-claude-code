@@ -1,6 +1,7 @@
 """Tests for Kimi (Moonshot) native Anthropic Messages provider."""
 
 from contextlib import asynccontextmanager
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -8,11 +9,22 @@ import pytest
 from api.models.anthropic import Message, MessagesRequest
 from config.constants import ANTHROPIC_DEFAULT_MAX_OUTPUT_TOKENS
 from core.anthropic.native_messages_request import ANTHROPIC_MIN_THINKING_BUDGET_TOKENS
+from core.http_context import set_inbound_user_agent
 from core.openai_responses import OpenAIResponsesAdapter
 from providers.base import ProviderConfig
 from providers.defaults import KIMI_DEFAULT_BASE
 from providers.exceptions import InvalidRequestError
 from providers.kimi import KimiProvider
+
+_KIMI_CODING_SUBSCRIPTION_BASE = "https://api.kimi.com/coding/v1"
+
+
+@pytest.fixture(autouse=True)
+def _reset_inbound_user_agent():
+    """Isolate the inbound User-Agent ContextVar between tests."""
+    set_inbound_user_agent(None)
+    yield
+    set_inbound_user_agent(None)
 
 
 @pytest.fixture
@@ -62,6 +74,22 @@ def test_request_headers(kimi_provider):
     h = kimi_provider._request_headers()
     assert h["Authorization"] == "Bearer test_kimi_key"
     assert h["anthropic-version"] == "2023-06-01"
+
+
+def test_request_headers_omits_user_agent_when_no_inbound_context(kimi_provider):
+    """No inbound UA set (e.g. startup discovery) -> no User-Agent key at all.
+
+    httpx then sends its own honest default; FCC never fabricates a UA.
+    """
+    h = kimi_provider._request_headers()
+    assert "User-Agent" not in h
+
+
+def test_request_headers_forwards_inbound_user_agent_byte_exact(kimi_provider):
+    """The inbound client's User-Agent is forwarded verbatim, never rewritten."""
+    set_inbound_user_agent("claude-cli/1.2.3 (external, cli)")
+    h = kimi_provider._request_headers()
+    assert h["User-Agent"] == "claude-cli/1.2.3 (external, cli)"
 
 
 def test_build_request_body_native(kimi_provider):
@@ -170,6 +198,7 @@ def test_build_request_body_rejects_extra_body(kimi_provider):
 
 @pytest.mark.asyncio
 async def test_model_list_uses_moonshot_openai_url(kimi_provider):
+    """With the default open-platform base, discovery uses the legacy OpenAI-compat URL."""
     called: dict[str, str] = {}
 
     async def fake_get(url: str, **_k):
@@ -185,6 +214,70 @@ async def test_model_list_uses_moonshot_openai_url(kimi_provider):
     await kimi_provider.list_model_infos()
 
     assert called["url"] == "https://api.moonshot.ai/v1/models"
+
+
+@pytest.mark.asyncio
+async def test_model_list_uses_derived_url_when_base_overridden():
+    """With KIMI_BASE_URL overridden to the subscription, discovery derives {base}/models."""
+    config = ProviderConfig(
+        api_key="test_kimi_key",
+        base_url=_KIMI_CODING_SUBSCRIPTION_BASE,
+        rate_limit=10,
+        rate_window=60,
+        enable_thinking=True,
+    )
+    with patch("httpx.AsyncClient"):
+        provider = KimiProvider(config)
+    assert provider._base_url == _KIMI_CODING_SUBSCRIPTION_BASE
+
+    called: dict[str, Any] = {}
+
+    async def fake_get(url: str, **kwargs):
+        called["url"] = url
+        called["headers"] = kwargs.get("headers")
+        mock_resp = MagicMock()
+        mock_resp.raise_for_status = lambda: None
+        mock_resp.json = lambda: {"data": [{"id": "k3[1m]"}]}
+        mock_resp.aclose = AsyncMock()
+        return mock_resp
+
+    provider._client.get = AsyncMock(side_effect=fake_get)
+
+    await provider.list_model_infos()
+
+    assert called["url"] == "/models"
+    assert called["headers"] == {"Authorization": "Bearer test_kimi_key"}
+
+
+@pytest.mark.asyncio
+async def test_send_stream_request_posts_to_overridden_subscription_base():
+    """POST /messages resolves against the overridden subscription base URL."""
+    config = ProviderConfig(
+        api_key="test_kimi_key",
+        base_url=_KIMI_CODING_SUBSCRIPTION_BASE,
+        rate_limit=10,
+        rate_window=60,
+        enable_thinking=True,
+    )
+    with patch("httpx.AsyncClient"):
+        provider = KimiProvider(config)
+
+    captured: dict[str, Any] = {}
+
+    def fake_build_request(method, url, **kwargs):
+        captured["method"] = method
+        captured["url"] = url
+        captured["headers"] = kwargs.get("headers")
+        return MagicMock()
+
+    provider._client.build_request = MagicMock(side_effect=fake_build_request)
+    provider._client.send = AsyncMock(return_value=MagicMock())
+
+    await provider._send_stream_request({"model": "k3[1m]"})
+
+    assert captured["method"] == "POST"
+    assert captured["url"] == "/messages"
+    provider._client.send.assert_awaited_once()
 
 
 @pytest.mark.asyncio

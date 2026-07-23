@@ -138,6 +138,7 @@ def test_admin_config_masks_secrets_and_exposes_manifest(monkeypatch, tmp_path):
     assert "GEMINI_API_KEY" in keys
     assert "GROQ_API_KEY" in keys
     assert "CEREBRAS_API_KEY" in keys
+    assert "KIMI_BASE_URL" in keys
     assert "ZAI_BASE_URL" not in keys
     assert "CLAUDE_WORKSPACE" not in keys
     assert "CLAUDE_CLI_BIN" not in keys

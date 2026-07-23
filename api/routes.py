@@ -5,6 +5,7 @@ from loguru import logger
 
 from config.settings import Settings
 from core.anthropic import get_token_count
+from core.http_context import set_inbound_user_agent
 from core.trace import trace_event
 from providers.registry import ProviderRegistry
 
@@ -19,11 +20,21 @@ from .request_pipeline import ApiRequestPipeline
 router = APIRouter()
 
 
-def get_request_pipeline(
+async def get_request_pipeline(
     request: Request,
     settings: Settings = Depends(get_settings),
 ) -> ApiRequestPipeline:
-    """Build the API request pipeline for route handlers."""
+    """Build the API request pipeline for route handlers.
+
+    ``async def`` is required (not just permitted) here: FastAPI runs sync
+    dependencies in a threadpool, where a :class:`contextvars.ContextVar` set
+    is confined to that worker thread's context copy and never reaches the
+    request's own asyncio task -- so the inbound User-Agent below would be set
+    and immediately discarded. As an ``async def``, this runs directly in the
+    request's task, so the set is visible when the provider streams the
+    response later in that same task (see ``core.http_context``).
+    """
+    set_inbound_user_agent(request.headers.get("user-agent"))
     return ApiRequestPipeline(
         settings,
         provider_getter=lambda provider_type: dependencies.resolve_provider(
