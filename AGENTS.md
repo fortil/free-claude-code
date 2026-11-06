@@ -1,6 +1,6 @@
 # AGENTIC DIRECTIVE
 
-> This file is identical to CLAUDE.md. Keep them in sync.
+> Única fuente de instrucciones del proyecto.
 
 ## CODING ENVIRONMENT
 
